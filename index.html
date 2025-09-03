@@ -322,22 +322,19 @@
 
   // Charts
   let groupChart, pieChart, balChart;
-  let groupChart;
   function renderGroupChart(canvas, grouped, mode, metric, eodMap){
-    const labels = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
+    const labels   = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
     const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
     const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
   
-    // For Date (day): plot Total (end-of-day). Else keep Net as context.
-    let lineLabel = 'Net', lineData = grouped.labels.map(l => grouped.stats.get(l).net);
+    let lineLabel = 'Net';
+    let lineData  = grouped.labels.map(l => grouped.stats.get(l).net);
     if (mode === 'day' && eodMap){
       lineLabel = 'Total (EOD)';
       lineData  = grouped.labels.map(iso => eodMap.get(iso) ?? null);
     }
   
-    // Horizontal bars for long labels
     const longLabels = (mode==='event' || mode==='category');
-    // Make canvas container taller when there are many labels
     try {
       const h = longLabels ? Math.min(900, 28*labels.length + 80) : 420;
       canvas.parentElement.style.height = h + 'px';
@@ -346,11 +343,7 @@
     const datasets = [];
     if (metric==='both' || metric==='income')  datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'s1' });
     if (metric==='both' || metric==='expense') datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'s1' });
-    // always show the line (as context)
-    datasets.push({
-      type:'line', label: lineLabel, data: lineData, yAxisID:'y1',
-      tension:.25, pointRadius: mode==='day' ? 2 : 0, borderDash: mode==='day' ? undefined : [4,4]
-    });
+    datasets.push({ type:'line', label: lineLabel, data: lineData, yAxisID:'y1', tension:.25, pointRadius: mode==='day'?2:0, borderDash: mode==='day'?undefined:[4,4] });
   
     if (groupChart) groupChart.destroy();
     groupChart = new Chart(canvas, {
@@ -361,16 +354,17 @@
         interaction:{ mode:'index', intersect:false },
         plugins:{ legend:{ position:'bottom' } },
         scales:{
-          x: longLabels ? { // values axis for horizontal bars
-            stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v }
-          } : { stacked: metric!=='net' },
-          y: longLabels ? { // label axis for horizontal bars
-            stacked: metric!=='net',
-            ticks:{ autoSkip:false, callback:(v,i,ticks)=>{
-              const s = t = ticks[i]?.label ?? ''; const str = String(s);
-              return str.length>24 ? str.slice(0,21)+'…' : str;
-            }}
-          } : { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } },
+          x: longLabels ? { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } }
+                        : { stacked: metric!=='net' },
+          y: longLabels ? {
+               stacked: metric!=='net',
+               ticks:{ autoSkip:false, callback:(v,i,ticks)=>{
+                 const s = ticks[i]?.label ?? ''; const str = String(s);
+                 return str.length>24 ? str.slice(0,21)+'…' : str;
+               }}
+             } : {
+               stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v }
+             },
           y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ callback:v=>'$'+v } }
         }
       }
