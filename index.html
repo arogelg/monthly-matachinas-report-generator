@@ -6,7 +6,6 @@
   <title>Report Generator</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <meta name="description" content="Drop your one-sheet Excel/CSV and get a clean, printable monthly report. All in the browser."/>
-
   <style>
     html, body { height:auto; overflow:auto; }
     @page { size: Letter; margin:16mm; }
@@ -25,7 +24,9 @@
 <main class="max-w-6xl mx-auto px-6 py-10">
   <header class="text-center no-print">
     <h1 class="text-4xl md:text-5xl font-extrabold text-slate-800">Monthly Report Generator</h1>
-    <p class="mt-3 text-slate-700">Upload your <span class="font-medium">one-sheet</span> Excel/CSV and get a pretty, printable report with flexible grouping.</p>
+    <p class="mt-3 text-slate-700">
+      Upload your <span class="font-medium">one-sheet</span> Excel/CSV and get a pretty, printable report with flexible grouping.
+    </p>
   </header>
 
   <!-- Controls / Uploader -->
@@ -34,9 +35,7 @@
       <label for="file-input" class="cursor-pointer rounded-lg bg-white border border-slate-200 px-4 py-2 shadow hover:shadow-md">Choose file</label>
       <input id="file-input" type="file" accept=".xlsx,.xls,.csv" class="hidden"/>
       <button id="generateBtn" disabled class="rounded-lg px-4 py-2 bg-slate-200 text-slate-500 cursor-not-allowed">Generate report</button>
-      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Print / Save PDF</button>
-      <button id="dlRowsBtn" disabled class="rounded-lg px-4 py-2 bg-indigo-600 text-white">Download CSV</button>
-      <button id="dlGroupedBtn" disabled class="rounded-lg px-4 py-2 bg-slate-800 text-white">Download Grouped CSV</button>
+      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Download PDF</button>
       <span class="text-sm text-slate-600">Accepted: .xlsx, .xls, .csv</span>
     </div>
 
@@ -76,31 +75,24 @@
   const errorEl     = document.getElementById('error');
   const generateBtn = document.getElementById('generateBtn');
   const printBtn    = document.getElementById('printBtn');
-  const dlRowsBtn   = document.getElementById('dlRowsBtn');
-  const dlGroupedBtn= document.getElementById('dlGroupedBtn');
   const report      = document.getElementById('report');
   const dropzone    = document.getElementById('dropzone');
   const resetBtn    = document.getElementById('resetBtn');
 
   // --- Helpers ---
+  
   const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
   const isCSV   = f => /\.(csv)$/i.test(f.name);
   const formatBytes = b => { if (b===0) return '0 B'; const k=1024,S=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(2)+' '+S[i]; };
   const currency = n => (n==null || isNaN(n)) ? '—' : n.toLocaleString(undefined,{style:'currency',currency:'USD'});
   const esc = s => String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-  const normalizeKey = (str)=> String(str||'')
-    .trim()
-    .toLowerCase()
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^a-z0-9]+/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
+  const normalizeKey = (str)=> String(str||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
 
-  // --- DATE: fix “day before” by forcing UTC everywhere ---
+  // --- DATE: force UTC so there’s no “day before” drift ---
   function excelSerialToISO(n){
-    const o = XLSX.SSF.parse_date_code(n);
-    if(!o) return '';
-    const d = new Date(Date.UTC(o.y, (o.m||1)-1, o.d||1, o.H||0, o.M||0, Math.floor(o.S||0)));
+    const o = XLSX.SSF.parse_date_code(n); if(!o) return '';
+    const d = new Date(Date.UTC(o.y,(o.m||1)-1,o.d||1,o.H||0,o.M||0,Math.floor(o.S||0)));
     return d.toISOString().slice(0,10);
   }
   function normalizeDateCell(val){
@@ -112,11 +104,27 @@
     const d = new Date(s);
     return isNaN(d) ? '' : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0,10);
   }
-  function formatISOAsLabel(iso){ // show nice label, still pinned to UTC
+  function formatISOAsLabel(iso){
     if(!iso) return 'No date';
     const [y,m,d] = iso.split('-').map(Number);
-    return new Date(Date.UTC(y, m-1, d)).toLocaleDateString(undefined,{timeZone:'UTC', month:'short', day:'numeric', year:'numeric'});
+    return new Date(Date.UTC(y,m-1,d)).toLocaleDateString(undefined,{timeZone:'UTC', month:'short', day:'numeric', year:'numeric'});
   }
+  
+  // Map of ISO day -> end-of-day total (prefers ledgerTotal, falls back to startTotal + deltas)
+  function buildEndOfDayTotals(rows, startTotal){
+    const ordered = rows.slice().sort((a,b)=> new Date(a.date) - new Date(b.date));
+    let curr = startTotal || 0, prevDay = null;
+    const eod = new Map(); // "YYYY-MM-DD" -> total
+    for(const r of ordered){
+      const day = r.date || '';
+      if (typeof r.ledgerTotal === 'number') curr = r.ledgerTotal;
+      else curr += (r.amount || 0);
+      if (day) eod.set(day, curr);
+      prevDay = day;
+    }
+    return eod;
+  }
+
 
   // Drag UI
   ['dragenter','dragover'].forEach(eName => dropzone.addEventListener(eName, e => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('ring-2','ring-emerald-400','bg-white'); }));
@@ -132,7 +140,6 @@
     fileNameEl.textContent = file.name;
     fileMetaEl.textContent = `${formatBytes(file.size)} • ${new Date(file.lastModified).toLocaleString()}`;
     statusBox.classList.remove('hidden');
-    [generateBtn, dlRowsBtn, dlGroupedBtn].forEach(b => b.disabled=true);
     generateBtn.disabled=false;
     generateBtn.classList.remove('cursor-not-allowed','bg-slate-200','text-slate-500');
     generateBtn.classList.add('bg-emerald-600','text-white');
@@ -144,7 +151,7 @@
   const readCSV      = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(file); });
   const toAOA        = ws => XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
 
-  // Parse main table
+  // Parse rows (+ optional Total in account)
   function parseRows(aoa){
     if(!aoa || !aoa.length) return [];
     const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
@@ -153,10 +160,9 @@
       event: headers.findIndex(h=>/^event name/i.test(h)),
       type: headers.findIndex(h=>/^entry type/i.test(h)),
       cat:  headers.findIndex(h=>/^category/i.test(h)),
-      desc: headers.findIndex(h=>/^description/i.test(h)),
       amt:  headers.findIndex(h=>/^amount/i.test(h)),
       pay:  headers.findIndex(h=>/^payment method/i.test(h)),
-      notes:headers.findIndex(h=>/^notes/i.test(h)),
+      total:headers.findIndex(h=>/^total in account/i.test(h)),
     };
     const rows=[];
     for(let i=1;i<aoa.length;i++){
@@ -167,43 +173,55 @@
       if(typeof rawAmt==='number') amt = rawAmt;
       else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-\.]/g,'')); amt = isNaN(n)? null : n; }
 
-      const typ = (r[idx.type]||'').toString().trim().toLowerCase();
-      const signedAmt = (typ==='expense') ? (amt!=null ? -amt : null) : amt;
+      const typeStr = (r[idx.type]||'').toString().trim().toLowerCase();
+      const signedAmt = (typeStr==='expense') ? (amt!=null ? -amt : null) : amt;
+
+      const totalCell = idx.total>-1 ? r[idx.total] : null;
+      let ledgerTotal = null;
+      if (typeof totalCell==='number') ledgerTotal = totalCell;
+      else if (typeof totalCell==='string'){ const n=parseFloat(totalCell.replace(/[^0-9\-\.]/g,'')); ledgerTotal = isNaN(n)? null : n; }
 
       rows.push({
         date: normalizeDateCell(idx.date>-1 ? r[idx.date] : ''),
         event: (r[idx.event]||'').toString().trim(),
-        type:  typ, // income|expense
+        type:  typeStr, // income|expense
         category: (r[idx.cat]||'').toString().trim(),
-        description: (r[idx.desc]||'').toString().trim(),
         amount: signedAmt,
         method: (r[idx.pay]||'').toString().trim(),
-        notes: (r[idx.notes]||'').toString().trim()
+        ledgerTotal: ledgerTotal
       });
     }
-    return rows.filter(x=> x.description || (typeof x.amount==='number'));
+    return rows.filter(x=> typeof x.amount==='number' || x.category || x.event);
   }
 
-  // Find optional "Amount at Month Start" anywhere on sheet (same col, next row)
-  function findStartingBalance(aoa){
-    for(let r=0;r<Math.min(aoa.length,50);r++){
-      for(let c=0;c<(aoa[r]||[]).length;c++){
-        const cell = (aoa[r][c]??'').toString().trim();
-        if(/^amount at month start/i.test(cell)){
-          const below = aoa[r+1]?.[c];
-          const right = aoa[r]?.[c+1];
-          const candidates = [below, right];
-          for(const v of candidates){
-            if(typeof v==='number') return v;
-            if(typeof v==='string'){ const n=parseFloat(v.replace(/[^0-9\-\.]/g,'')); if(!isNaN(n)) return n; }
+  // Find the "Balance at Moment of Starting the Report / Bank / Cash" block
+  function findStartBreakdown(aoa){
+    let total=0, bank=0, cash=0;
+    outer: for(let r=0;r<Math.min(aoa.length,60);r++){
+      for(let c=0;c<Math.min((aoa[r]||[]).length,60);c++){
+        const cell = (aoa[r][c]??'').toString().trim().toLowerCase();
+        if(cell.includes('balance at moment of starting the report')){
+          const r2 = r+1;
+          // Look for labels on the same header row
+          for(let k=0;k<6;k++){
+            const label = (aoa[r]?.[c+k]||'').toString().trim().toLowerCase();
+            const val   = aoa[r2]?.[c+k];
+            const num = (typeof val==='number') ? val :
+                        (typeof val==='string' ? parseFloat(val.replace(/[^0-9\-\.]/g,'')) : NaN);
+            if(!isNaN(num)){
+              if(label.includes('bank')) bank = num;
+              else if(label.includes('cash')) cash = num;
+              else if(label.includes('balance')) total = num;
+            }
           }
+          // Fallback: if total missing, add bank+cash
+          if(!total && (bank||cash)) total = (bank||0)+(cash||0);
+          break outer;
         }
       }
     }
-    return 0;
+    return { total: total||0, bank: bank||0, cash: cash||0 };
   }
-
-  const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
 
   function groupRows(rows, mode){
     const map = new Map();
@@ -214,7 +232,6 @@
       if (amt>=0) e.income += amt; else e.expense += Math.abs(amt);
       e.net += amt;
     };
-
     for (const r of rows){
       let key;
       if (mode==='event'){
@@ -234,21 +251,25 @@
       }
       if (typeof r.amount==='number') push(key, r.amount);
     }
-
     let labels = Array.from(map.keys());
-    if (mode==='day'){
-      labels.sort((a,b)=> new Date(a) - new Date(b));
-    } else if (mode==='year'){
-      labels.sort((a,b)=> a.localeCompare(b));
-    } else {
-      labels.sort((a,b)=> a.localeCompare(b));
-    }
+    if (mode==='day'){ labels.sort((a,b)=> new Date(a) - new Date(b)); }
+    else if (mode==='year'){ labels.sort((a,b)=> a.localeCompare(b)); }
+    else { labels.sort((a,b)=> a.localeCompare(b)); }
     return { labels, stats: map };
   }
 
-  // Running balance (overall)
+  // Running balance: prefer ledger column; else compute from start total by day
   function computeBalanceSeries(rows, startTotal){
-    const byDay = new Map(); // iso -> net that day
+    const withLedger = rows.filter(r=> typeof r.ledgerTotal==='number' && r.date);
+    if (withLedger.length){
+      const ordered = withLedger.slice().sort((a,b)=> new Date(a.date)-new Date(b.date));
+      return {
+        labels: ordered.map(r=> formatISOAsLabel(r.date)),
+        data:   ordered.map(r=> r.ledgerTotal)
+      };
+    }
+    // fallback: compute by-day
+    const byDay = new Map();
     for(const r of rows){
       const d = r.date || 'No date';
       if(!byDay.has(d)) byDay.set(d,0);
@@ -258,14 +279,11 @@
     const labels = days.map(d=> formatISOAsLabel(d));
     const series = [];
     let bal = startTotal||0;
-    for(const d of days){
-      bal += byDay.get(d);
-      series.push(bal);
-    }
+    for(const d of days){ bal += byDay.get(d); series.push(bal); }
     return {labels, data: series};
   }
 
-  // Cash vs Bank balances (Bank includes Zelle)
+  // Cash vs Bank balances (start + deltas)
   function methodBalances(rows, startCash=0, startBank=0){
     const norm = s => String(s||'').toLowerCase();
     let cash = startCash||0, bank = startBank||0;
@@ -273,7 +291,7 @@
       const m = norm(r.method);
       const amt = r.amount||0;
       if (m.includes('cash')) cash += amt;
-      else bank += amt; // treat Bank/Zelle/unknown as bank bucket
+      else bank += amt; // Bank/Zelle/unknown → bank bucket
     }
     return { cash, bank };
   }
@@ -285,13 +303,228 @@
       <div class="text-2xl font-bold mt-1">${value}</div>
     </div>`;
   }
-  function cards(t){
+  function totalsCards(t){
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
         ${card('Total Income', currency(t.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
         ${card('Total Expenses', currency(t.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
         ${card('Net', currency(t.netAll), t.netAll>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
       </div>`;
+  }
+  function startCards(s){
+    return `
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+        ${card('Starting Total', currency(s.total), 'bg-slate-50 text-slate-700 border-slate-200')}
+        ${card('Starting Bank (incl. Zelle)', currency(s.bank), 'bg-slate-50 text-slate-700 border-slate-200')}
+        ${card('Starting Cash', currency(s.cash), 'bg-slate-50 text-slate-700 border-slate-200')}
+      </div>`;
+  }
+
+  // Charts
+  let groupChart, pieChart, balChart;
+  let groupChart;
+  function renderGroupChart(canvas, grouped, mode, metric, eodMap){
+    const labels = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
+    const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
+    const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
+  
+    // For Date (day): plot Total (end-of-day). Else keep Net as context.
+    let lineLabel = 'Net', lineData = grouped.labels.map(l => grouped.stats.get(l).net);
+    if (mode === 'day' && eodMap){
+      lineLabel = 'Total (EOD)';
+      lineData  = grouped.labels.map(iso => eodMap.get(iso) ?? null);
+    }
+  
+    // Horizontal bars for long labels
+    const longLabels = (mode==='event' || mode==='category');
+    // Make canvas container taller when there are many labels
+    try {
+      const h = longLabels ? Math.min(900, 28*labels.length + 80) : 420;
+      canvas.parentElement.style.height = h + 'px';
+    } catch {}
+  
+    const datasets = [];
+    if (metric==='both' || metric==='income')  datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'s1' });
+    if (metric==='both' || metric==='expense') datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'s1' });
+    // always show the line (as context)
+    datasets.push({
+      type:'line', label: lineLabel, data: lineData, yAxisID:'y1',
+      tension:.25, pointRadius: mode==='day' ? 2 : 0, borderDash: mode==='day' ? undefined : [4,4]
+    });
+  
+    if (groupChart) groupChart.destroy();
+    groupChart = new Chart(canvas, {
+      data: { labels, datasets },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        indexAxis: longLabels ? 'y' : 'x',
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend:{ position:'bottom' } },
+        scales:{
+          x: longLabels ? { // values axis for horizontal bars
+            stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v }
+          } : { stacked: metric!=='net' },
+          y: longLabels ? { // label axis for horizontal bars
+            stacked: metric!=='net',
+            ticks:{ autoSkip:false, callback:(v,i,ticks)=>{
+              const s = t = ticks[i]?.label ?? ''; const str = String(s);
+              return str.length>24 ? str.slice(0,21)+'…' : str;
+            }}
+          } : { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } },
+          y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ callback:v=>'$'+v } }
+        }
+      }
+    });
+  }
+
+  function renderPie(canvas, cash, bank){
+    if (pieChart) pieChart.destroy();
+    pieChart = new Chart(canvas, {
+      type:'doughnut',
+      data:{ labels:['Cash','Bank (incl. Zelle)'], datasets:[{ data:[cash, bank] }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{ legend:{ position:'bottom' } } }
+    });
+  }
+  function renderBalanceLine(canvas, series){
+    if (balChart) balChart.destroy();
+    balChart = new Chart(canvas, {
+      type:'line',
+      data:{ labels: series.labels, datasets:[{ label:'Running Balance', data: series.data, tension:.25, pointRadius:2 }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:false, ticks:{ callback:v=>'$'+v } } } }
+    });
+  }
+
+  async function buildReport(file){
+    try{
+      const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = toAOA(ws);
+      const rows = parseRows(aoa);
+      const start = findStartBreakdown(aoa);
+
+      // Totals
+      const totals = {
+        incomeAll: sum(rows, r=> r.amount>0 ? r.amount : 0),
+        expenseAll: sum(rows, r=> r.amount<0 ? -r.amount : 0)
+      };
+      totals.netAll = totals.incomeAll - totals.expenseAll;
+
+      // Date range
+      const dates = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
+      const rangeLabel = dates.length ? `${formatISOAsLabel(dates[0])} – ${formatISOAsLabel(dates[dates.length-1])}` : '—';
+
+      // Build report shell
+      report.innerHTML = `
+        <!-- Print header -->
+        <div class="print-only mb-4">
+          <h1 class="text-3xl font-extrabold text-center">Matachinas Financial Report</h1>
+          <p class="text-center text-slate-600">${esc(file.name)} • ${esc(rangeLabel)}</p>
+        </div>
+
+        <div class="page bg-white rounded-2xl shadow-sm p-6">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-extrabold text-slate-800">Monthly Financial Summary</h2>
+              <p class="text-slate-600">File: ${esc(file.name)}</p>
+              <p class="text-slate-500 text-sm">Period: ${esc(rangeLabel)}</p>
+            </div>
+            <div class="text-right text-sm text-slate-500">All amounts in USD</div>
+          </div>
+
+          ${totalsCards(totals)}
+          ${startCards(start)}
+
+          <!-- Controls -->
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 no-print">
+            <div>
+              <label class="text-sm text-slate-600">Group by</label>
+              <select id="groupSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                <option value="day">Date (day)</option>
+                <option value="event">Event name</option>
+                <option value="category">Category</option>
+                <option value="year">Year</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm text-slate-600">Metric</label>
+              <select id="metricSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                <option value="both">Income & Expenses</option>
+                <option value="income">Income only</option>
+                <option value="expense">Expenses only</option>
+                <option value="net">Net (line)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Charts: main big (2/3) + flow small (1/3) -->
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="md:col-span-2 h-[420px]"><canvas id="groupChart"></canvas></div>
+            <div class="h-[420px]"><canvas id="balanceLine"></canvas></div>
+          </div>
+          <!-- Donut below -->
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="h-72"><canvas id="methodPie"></canvas></div>
+          </div>
+        </div>
+
+        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
+          <h3 class="text-xl font-bold text-slate-800">Events Overview (Grouped)</h3>
+          <div id="eventsTable" class="mt-2"></div>
+        </div>
+
+        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
+          <h3 class="text-xl font-bold text-slate-800">All Transactions</h3>
+          ${transactionsTable(rows)}
+        </div>
+      `;
+
+      // Enable PDF
+      printBtn.disabled = false;
+
+      // Wire up charts
+      const groupSelect  = document.getElementById('groupSelect');
+      const metricSelect = document.getElementById('metricSelect');
+      const groupCanvas  = document.getElementById('groupChart');
+      const pieCanvas    = document.getElementById('methodPie');
+      const balCanvas    = document.getElementById('balanceLine');
+      const evTableDiv   = document.getElementById('eventsTable');
+
+      function recompute(){
+        const mode   = groupSelect.value;
+        const metric = metricSelect.value;
+      
+        const grouped = groupRows(rows, mode);
+      
+        // NEW: end-of-day totals map for the "Total (EOD)" line
+        const eodMap = buildEndOfDayTotals(rows, start.total);
+      
+        renderGroupChart(groupCanvas, grouped, mode, metric, eodMap);
+      
+        // Pie = final balances (start + deltas)
+        const mb = methodBalances(rows, start.cash, start.bank);
+        renderPie(pieCanvas, mb.cash, mb.bank);
+      
+        // Running balance line (still full-width ledger curve)
+        const series = computeBalanceSeries(rows, start.total);
+        renderBalanceLine(balCanvas, series);
+      
+        const evGrouped = groupRows(rows, 'event');
+        evTableDiv.innerHTML = eventsOverviewTable(evGrouped);
+      }
+
+
+      groupSelect.value = 'day'; // default
+      metricSelect.value = 'both';
+      groupSelect.addEventListener('change', recompute);
+      metricSelect.addEventListener('change', recompute);
+      recompute();
+
+      report.classList.remove('hidden');
+    } catch(err){
+      errorEl.textContent = 'Could not read file. Make sure it uses the one-sheet headers.';
+      errorEl.classList.remove('hidden');
+      console.error(err);
+    }
   }
 
   function eventsOverviewTable(grouped){
@@ -324,10 +557,9 @@
       <td class="py-1.5 pr-3 whitespace-nowrap">${esc(r.date)}</td>
       <td class="py-1.5 pr-3">${esc(r.event || 'Unlabeled')}</td>
       <td class="py-1.5 pr-3">${esc(r.category)}</td>
-      <td class="py-1.5 pr-3">${esc(r.description)}</td>
       <td class="py-1.5 pr-3 text-right ${r.amount>=0?'text-emerald-700':'text-rose-700'}">${currency(Math.abs(r.amount))} ${r.amount>=0?'(Income)':'(Expense)'}</td>
       <td class="py-1.5 pr-3">${esc(r.method)}</td>
-      <td class="py-1.5 pr-3 text-slate-500">${esc(r.notes)}</td>
+      <td class="py-1.5 pr-3 text-right ${typeof r.ledgerTotal==='number'?'':'text-slate-400'}">${typeof r.ledgerTotal==='number' ? currency(r.ledgerTotal) : ''}</td>
     </tr>`).join('');
     return `<table class="w-full mt-3 text-sm">
       <thead>
@@ -335,248 +567,17 @@
           <th class="font-medium pb-1">Date</th>
           <th class="font-medium pb-1">Event</th>
           <th class="font-medium pb-1">Category</th>
-          <th class="font-medium pb-1">Description</th>
           <th class="font-medium pb-1 text-right">Amount</th>
           <th class="font-medium pb-1">Method</th>
-          <th class="font-medium pb-1">Notes</th>
+          <th class="font-medium pb-1 text-right">Total in account</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
     </table>`;
   }
 
-  // Charts
-  let groupChart, pieChart, balChart;
-  function renderGroupChart(canvas, grouped, mode, metric){
-    const labels = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
-    const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
-    const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
-    const nets     = grouped.labels.map(l => grouped.stats.get(l).net);
-
-    const datasets = [];
-    if (metric==='both' || metric==='income'){
-      datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'stack1' });
-    }
-    if (metric==='both' || metric==='expense'){
-      datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'stack1' });
-    }
-    if (metric==='net'){
-      datasets.push({ type:'line', label:'Net', data: nets, yAxisID:'y1', tension:.25, pointRadius:2 });
-    } else {
-      datasets.push({ type:'line', label:'Net', data: nets, yAxisID:'y1', borderWidth:1, borderDash:[4,4], pointRadius:0 });
-    }
-
-    if (groupChart) groupChart.destroy();
-    groupChart = new Chart(canvas, {
-      data: { labels, datasets },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false },
-        plugins:{ legend:{ position:'bottom' } },
-        scales:{
-          x:{ stacked: metric!=='net' },
-          y:{ stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } },
-          y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ callback:v=>'$'+v } }
-        }
-      }
-    });
-  }
-  function renderPie(canvas, cash, bank){
-    if (pieChart) pieChart.destroy();
-    pieChart = new Chart(canvas, {
-      type:'pie',
-      data:{ labels:['Cash','Bank (incl. Zelle)'], datasets:[{ data:[cash, bank] }] },
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } }
-    });
-  }
-  function renderBalanceLine(canvas, series){
-    if (balChart) balChart.destroy();
-    balChart = new Chart(canvas, {
-      type:'line',
-      data:{ labels: series.labels, datasets:[{ label:'Running Balance', data: series.data, tension:.25, pointRadius:2 }] },
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:false, ticks:{ callback:v=>'$'+v } } } }
-    });
-  }
-
-  // CSV downloads
-  function toCSV(arr){
-    return arr.map(row=> row.map(v=>{
-      const s = (v==null)? '' : String(v);
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-    }).join(',')).join('\n');
-  }
-  function download(name, text){
-    const blob = new Blob([text], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  }
-
-  async function buildReport(file){
-    try{
-      const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const aoa = toAOA(ws);
-      const rows = parseRows(aoa);
-
-      // Totals
-      const totals = {
-        incomeAll: sum(rows, r=> r.amount>0 ? r.amount : 0),
-        expenseAll: sum(rows, r=> r.amount<0 ? -r.amount : 0)
-      };
-      totals.netAll = totals.incomeAll - totals.expenseAll;
-
-      // Start balance detection + editable inputs
-      const detectedStart = findStartingBalance(aoa) || 0;
-
-      // Date range
-      const dates = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
-      const rangeLabel = dates.length ? `${formatISOAsLabel(dates[0])} – ${formatISOAsLabel(dates[dates.length-1])}` : '—';
-
-      report.innerHTML = `
-        <!-- Print header -->
-        <div class="print-only mb-4">
-          <h1 class="text-3xl font-extrabold text-center">Matachinas Financial Report</h1>
-          <p class="text-center text-slate-600">${esc(file.name)} • ${esc(rangeLabel)}</p>
-        </div>
-
-        <div class="page bg-white rounded-2xl shadow-sm p-6">
-          <div class="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 class="text-2xl font-extrabold text-slate-800">Monthly Financial Summary</h2>
-              <p class="text-slate-600">File: ${esc(file.name)}</p>
-              <p class="text-slate-500 text-sm">Period: ${esc(rangeLabel)}</p>
-            </div>
-            <div class="text-right text-sm text-slate-500">All amounts in USD</div>
-          </div>
-
-          ${cards(totals)}
-
-          <!-- Grouping & metric -->
-          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
-            <div>
-              <label class="text-sm text-slate-600">Group by</label>
-              <select id="groupSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
-                <option value="day">Date (day)</option>
-                <option value="event">Event name</option>
-                <option value="category">Category</option>
-                <option value="year">Year</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-sm text-slate-600">Metric</label>
-              <select id="metricSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
-                <option value="both">Income & Expenses</option>
-                <option value="income">Income only</option>
-                <option value="expense">Expenses only</option>
-                <option value="net">Net (line)</option>
-              </select>
-            </div>
-            <div class="border rounded-lg p-3 bg-slate-50">
-              <div class="text-sm text-slate-600 mb-1">Starting balances</div>
-              <div class="flex gap-2">
-                <label class="text-sm flex-1">Cash
-                  <input id="startCash" type="number" step="0.01" class="mt-1 w-full border rounded-lg px-2 py-1" value="0">
-                </label>
-                <label class="text-sm flex-1">Bank (incl. Zelle)
-                  <input id="startBank" type="number" step="0.01" class="mt-1 w-full border rounded-lg px-2 py-1" value="${detectedStart.toFixed(2)}">
-                </label>
-              </div>
-              <p class="text-xs text-slate-500 mt-1">Detected total start: ${currency(detectedStart)} (editable)</p>
-            </div>
-          </div>
-
-          <!-- Charts -->
-          <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="h-80"><canvas id="groupChart"></canvas></div>
-            <div class="h-80"><canvas id="methodPie"></canvas></div>
-          </div>
-          <div class="mt-6 h-72">
-            <canvas id="balanceLine"></canvas>
-          </div>
-        </div>
-
-        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
-          <h3 class="text-xl font-bold text-slate-800">Events Overview (Grouped)</h3>
-          <div id="eventsTable" class="mt-2"></div>
-        </div>
-
-        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
-          <h3 class="text-xl font-bold text-slate-800">All Transactions</h3>
-          ${transactionsTable(rows)}
-        </div>
-      `;
-
-      // Enable actions
-      printBtn.disabled = false;
-      dlRowsBtn.disabled = false;
-      dlGroupedBtn.disabled = false;
-
-      // Wire up dynamic bits
-      const groupSelect  = document.getElementById('groupSelect');
-      const metricSelect = document.getElementById('metricSelect');
-      const startCashInp = document.getElementById('startCash');
-      const startBankInp = document.getElementById('startBank');
-      const groupCanvas  = document.getElementById('groupChart');
-      const pieCanvas    = document.getElementById('methodPie');
-      const balCanvas    = document.getElementById('balanceLine');
-      const evTableDiv   = document.getElementById('eventsTable');
-
-      function recompute(){
-        const mode   = groupSelect.value;
-        const metric = metricSelect.value;
-        const startCash = parseFloat(startCashInp.value||'0')||0;
-        const startBank = parseFloat(startBankInp.value||'0')||0;
-
-        const grouped = groupRows(rows, mode);
-        renderGroupChart(groupCanvas, grouped, mode, metric);
-
-        const mb = methodBalances(rows, startCash, startBank);
-        renderPie(pieCanvas, mb.cash, mb.bank);
-
-        const series = computeBalanceSeries(rows, startCash + startBank);
-        renderBalanceLine(balCanvas, series);
-
-        const evGrouped = groupRows(rows, 'event');
-        evTableDiv.innerHTML = eventsOverviewTable(evGrouped);
-
-        // update grouped CSV button behavior
-        dlGroupedBtn.onclick = ()=>{
-          const csvArr = [['Label','Income','Expenses','Net']];
-          for(const l of grouped.labels){
-            const s = grouped.stats.get(l);
-            csvArr.push([l, s.income.toFixed(2), s.expense.toFixed(2), s.net.toFixed(2)]);
-          }
-          download('grouped.csv', toCSV(csvArr));
-        };
-      }
-
-      groupSelect.value = 'day'; // default as requested
-      metricSelect.value = 'both';
-      ['change','input'].forEach(ev=>{
-        groupSelect.addEventListener(ev, recompute);
-        metricSelect.addEventListener(ev, recompute);
-        startCashInp.addEventListener(ev, recompute);
-        startBankInp.addEventListener(ev, recompute);
-      });
-      recompute();
-
-      // CSV of normalized rows
-      dlRowsBtn.onclick = ()=>{
-        const header = ['Date','Event Name','Entry Type','Category','Description','AmountSigned','Method','Notes'];
-        const data = rows.map(r=> [r.date, r.event, r.type, r.category, r.description, r.amount, r.method, r.notes]);
-        download('transactions_normalized.csv', toCSV([header, ...data]));
-      };
-
-      report.classList.remove('hidden');
-    } catch(err){
-      errorEl.textContent = 'Could not read file. Make sure it uses the one-sheet headers.';
-      errorEl.classList.remove('hidden');
-      console.error(err);
-    }
-  }
-
   // Initial disabled state
-  (function init(){ generateBtn.disabled = true; printBtn.disabled = true; dlRowsBtn.disabled = true; dlGroupedBtn.disabled = true; })();
+  (function init(){ generateBtn.disabled = true; printBtn.disabled = true; })();
 </script>
 </body>
 </html>
