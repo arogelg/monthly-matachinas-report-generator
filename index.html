@@ -1,31 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Report Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Drop your one-sheet Excel/CSV and get a clean, printable monthly report. All in the browser."/>
+  <style>
+    html, body { height:auto; overflow:auto; }
+    @page { size: Letter; margin:16mm; }
+    @media print {
+      body { background:#fff !important; }
+      #uploader, #error, #controls { display:none !important; }
+      #report { box-shadow:none !important; width:auto !important; }
+      .page { page-break-after:always; }
+      .page:last-child { page-break-after:auto; }
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-rose-50 via-indigo-50 to-emerald-50">
+<main class="max-w-6xl mx-auto px-6 py-10">
+  <header class="text-center">
+    <h1 class="text-4xl md:text-5xl font-extrabold text-slate-800">Monthly Report Generator</h1>
+    <p class="mt-3 text-slate-700">
+      Upload your <span class="font-medium">one-sheet</span> Excel/CSV and get a pretty, printable report with flexible grouping.
+    </p>
+  </header>
+
+  <!-- Controls / Uploader -->
+  <section id="uploader" class="mt-8">
+    <div class="flex flex-wrap gap-3 items-center" id="controls">
+      <label for="file-input" class="cursor-pointer rounded-lg bg-white border border-slate-200 px-4 py-2 shadow hover:shadow-md">
+        Choose file
+      </label>
+      <input id="file-input" type="file" accept=".xlsx,.xls,.csv" class="hidden"/>
+      <button id="generateBtn" disabled class="rounded-lg px-4 py-2 bg-slate-200 text-slate-500 cursor-not-allowed">
+        Generate report
+      </button>
+      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Print / Save PDF</button>
+      <span class="text-sm text-slate-600">Accepted: .xlsx, .xls, .csv</span>
+    </div>
+
+    <div id="status" class="mt-4 hidden">
+      <div class="rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm flex items-center gap-3">
+        <div class="w-10 h-10 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">FILE</div>
+        <div class="min-w-0 flex-1">
+          <div id="fileName" class="font-medium text-slate-800 truncate">—</div>
+          <div id="fileMeta" class="text-sm text-slate-600">—</div>
+        </div>
+        <button id="resetBtn" class="text-slate-500 hover:text-slate-700 text-sm">Reset</button>
+      </div>
+    </div>
+
+    <!-- Drag & drop -->
+    <label id="dropzone" for="file-input" class="mt-6 block text-center rounded-2xl border-2 border-dashed border-slate-300 bg-white/70 backdrop-blur-sm p-10 shadow-sm hover:shadow transition cursor-pointer">
+      <p class="text-lg font-semibold text-slate-800">Drag & drop your Excel/CSV here</p>
+      <p class="text-slate-600 mt-1">or click to choose a file</p>
+    </label>
+
+    <p id="error" class="mt-3 hidden text-sm text-rose-600"></p>
+  </section>
+
+  <!-- Report -->
+  <section id="report" class="mt-12 hidden"></section>
+</main>
+
+<!-- SheetJS + Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-  // Elements
-  const fileInput = document.getElementById('file-input');
-  const statusBox = document.getElementById('status');
+  // --- Elements ---
+  const fileInput  = document.getElementById('file-input');
+  const statusBox  = document.getElementById('status');
   const fileNameEl = document.getElementById('fileName');
   const fileMetaEl = document.getElementById('fileMeta');
-  const errorEl = document.getElementById('error');
-  const generateBtn = document.getElementById('generateBtn');
-  const printBtn = document.getElementById('printBtn');
-  const report = document.getElementById('report');
-  const dropzone = document.getElementById('dropzone');
-  const resetBtn = document.getElementById('resetBtn');
-  const progressEl = document.getElementById('progress');
+  const errorEl    = document.getElementById('error');
+  const generateBtn= document.getElementById('generateBtn');
+  const printBtn   = document.getElementById('printBtn');
+  const report     = document.getElementById('report');
+  const dropzone   = document.getElementById('dropzone');
+  const resetBtn   = document.getElementById('resetBtn');
 
-  // Helpers
-  const isExcel = (f) => /\.(xlsx|xls)$/i.test(f.name);
-  const isCSV   = (f) => /\.(csv)$/i.test(f.name);
-  const formatBytes = (bytes) => { if(bytes===0) return '0 B'; const k=1024, sizes=['B','KB','MB','GB']; const i=Math.floor(Math.log(bytes)/Math.log(k)); return (bytes/Math.pow(k,i)).toFixed(2)+' '+sizes[i]; };
-  const currency = (n) => n==null||isNaN(n) ? '—' : n.toLocaleString(undefined,{style:'currency',currency:'USD'});
-  const normalize = (s) => (s||'').toString().trim().replace(/\s+/g,' ').toLowerCase();
+  // --- Helpers ---
+  const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
+  const isCSV   = f => /\.(csv)$/i.test(f.name);
+  const formatBytes = b => { if (b===0) return '0 B'; const k=1024,S=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(2)+' '+S[i]; };
+  const currency = n => (n==null || isNaN(n)) ? '—' : n.toLocaleString(undefined,{style:'currency',currency:'USD'});
 
   // Drag UI
-  ['dragenter','dragover'].forEach(eName => dropzone.addEventListener(eName, e=>{ e.preventDefault(); e.stopPropagation(); dropzone.classList.add('ring-2','ring-emerald-400','bg-white'); }));
-  ['dragleave','drop'].forEach(eName => dropzone.addEventListener(eName, e=>{ e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('ring-2','ring-emerald-400','bg-white'); }));
-  dropzone.addEventListener('drop', (e)=>{ const f=e.dataTransfer?.files?.[0]; if(f) handleFile(f); });
-  fileInput.addEventListener('change', (e)=>{ const f=e.target.files?.[0]; if(f) handleFile(f); });
+  ['dragenter','dragover'].forEach(eName => dropzone.addEventListener(eName, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.add('ring-2','ring-emerald-400','bg-white');
+  }));
+  ['dragleave','drop'].forEach(eName => dropzone.addEventListener(eName, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropzone.classList.remove('ring-2','ring-emerald-400','bg-white');
+  }));
+  dropzone.addEventListener('drop', e => { const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f); });
+  fileInput.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) handleFile(f); });
+  if (resetBtn) resetBtn.addEventListener('click', () => location.reload());
+  printBtn.addEventListener('click', () => window.print());
 
   function handleFile(file){
     errorEl.classList.add('hidden'); errorEl.textContent='';
@@ -33,46 +107,44 @@
     fileNameEl.textContent = file.name;
     fileMetaEl.textContent = `${formatBytes(file.size)} • ${new Date(file.lastModified).toLocaleString()}`;
     statusBox.classList.remove('hidden');
-    generateBtn.disabled=false; generateBtn.classList.remove('cursor-not-allowed','bg-slate-200','text-slate-500'); generateBtn.classList.add('bg-emerald-600','text-white');
-    generateBtn.onclick = async ()=> buildReport(file);
+    generateBtn.disabled=false;
+    generateBtn.classList.remove('cursor-not-allowed','bg-slate-200','text-slate-500');
+    generateBtn.classList.add('bg-emerald-600','text-white');
+    generateBtn.onclick = async () => buildReport(file);
   }
-  if (resetBtn) resetBtn.addEventListener('click', ()=>{ location.reload(); });
-  printBtn.addEventListener('click', ()=> window.print());
 
   // File readers
-  const readWorkbook = (file)=> new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=(e)=>{ try{ const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'}); resolve(wb);}catch(err){reject(err);} }; r.onerror=reject; r.readAsArrayBuffer(file); });
-  const readCSV = (file)=> new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=(e)=>{ try{ const wb=XLSX.read(e.target.result,{type:'string'}); resolve(wb);}catch(err){reject(err);} }; r.onerror=reject; r.readAsText(file); });
-  const toAOA = (ws)=> XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  const readWorkbook = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsArrayBuffer(file); });
+  const readCSV      = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(file); });
+  const toAOA        = ws => XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
 
-  // Parse expected one-sheet template
+  // Parse rows (we treat every row as part of an "event occasion")
   function parseRows(aoa){
     if(!aoa || !aoa.length) return [];
     const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
     const idx = {
       date: headers.findIndex(h=>/^date/i.test(h)),
       event: headers.findIndex(h=>/^event name/i.test(h)),
-      type:  headers.findIndex(h=>/^entry type/i.test(h)),
-      cat:   headers.findIndex(h=>/^category/i.test(h)),
-      desc:  headers.findIndex(h=>/^description/i.test(h)),
-      amt:   headers.findIndex(h=>/^amount/i.test(h)),
-      pay:   headers.findIndex(h=>/^payment method/i.test(h)),
+      type: headers.findIndex(h=>/^entry type/i.test(h)),
+      cat: headers.findIndex(h=>/^category/i.test(h)),
+      desc: headers.findIndex(h=>/^description/i.test(h)),
+      amt: headers.findIndex(h=>/^amount/i.test(h)),
+      pay: headers.findIndex(h=>/^payment method/i.test(h)),
       notes: headers.findIndex(h=>/^notes/i.test(h)),
     };
-    const out=[];
+    const rows=[];
     for(let i=1;i<aoa.length;i++){
       const r = aoa[i]||[];
       const rawAmt = r[idx.amt];
       let amt = null;
       if(typeof rawAmt==='number') amt = rawAmt;
-      else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-.]/g,'')); amt = isNaN(n)? null : n; }
+      else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-\.]/g,'')); amt = isNaN(n)? null : n; }
       const typ = (r[idx.type]||'').toString().trim().toLowerCase();
       const signedAmt = (typ==='expense') ? (amt!=null ? -amt : null) : amt;
-      const eventName = (r[idx.event]||'').toString().trim();
-      out.push({
+      rows.push({
         date: r[idx.date] ? String(r[idx.date]).slice(0,10) : '',
-        event: eventName,
-        eventKey: normalize(eventName),
-        type: typ,
+        event: (r[idx.event]||'').toString().trim(),
+        type: typ, // income|expense
         category: (r[idx.cat]||'').toString().trim(),
         description: (r[idx.desc]||'').toString().trim(),
         amount: signedAmt,
@@ -80,224 +152,299 @@
         notes: (r[idx.notes]||'').toString().trim()
       });
     }
-    return out.filter(x=> x.event || x.description || (typeof x.amount==='number'));
+    return rows.filter(x=> x.description || (typeof x.amount==='number'));
   }
 
-  // Groupers
-  function groupByEvent(rows){
-    const map = {}, display = {};
-    for(const r of rows){
-      const key = r.eventKey || '(sin nombre)';
-      if(!map[key]){ map[key] = {income:0, expense:0, net:0, rows:[]}; display[key] = r.event || '(Sin nombre)'; }
-      if(typeof r.amount==='number'){ if(r.amount>=0) map[key].income += r.amount; else map[key].expense += Math.abs(r.amount); map[key].net += r.amount; }
-      map[key].rows.push(r);
-    }
-    return {map, display};
-  }
-  function groupByTypePerEvent(rows, want){
-    const filtered = rows.filter(r => (want==='income') ? r.amount>=0 : r.amount<0);
-    const map = {}, display = {};
-    for(const r of filtered){
-      const key = r.eventKey || '(sin nombre)';
-      if(!map[key]){ map[key]=0; display[key] = r.event || '(Sin nombre)'; }
-      map[key] += Math.abs(r.amount||0);
-    }
-    return {map, display};
-  }
-  function groupByDate(rows){
-    const months = new Set(rows.filter(r=>r.date).map(r=> r.date.slice(0,7)));
-    const useMonthly = months.size > 1;
-    const keyOf = (d)=> d ? (useMonthly ? d.slice(0,7) : d.slice(0,10)) : '(sin fecha)';
-    const map = {};
-    for(const r of rows){
-      const k = keyOf(r.date);
-      if(!map[k]) map[k] = {income:0, expense:0, net:0};
-      if(typeof r.amount==='number'){ if(r.amount>=0) map[k].income += r.amount; else map[k].expense += Math.abs(r.amount); map[k].net += r.amount; }
-    }
-    return {map, label: useMonthly ? 'Month' : 'Date'};
+  const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
+  const esc = (s)=> String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  const normalizeKey = (str)=> String(str||'')
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')   // drop accents
+    .replace(/[^a-z0-9]+/g,' ')                         // keep letters/numbers
+    .replace(/\s+/g,' ')                                 // single spaces
+    .trim();
+
+  function inferDefaultGrouping(rows){
+    const months = new Set(rows.map(r=> r.date?.slice(0,7)).filter(Boolean));
+    const years  = new Set(rows.map(r=> r.date?.slice(0,4)).filter(Boolean));
+    if (months.size <= 1) return 'day';
+    if (years.size  <= 1) return 'month';
+    return 'year';
   }
 
-  // UI helpers
+  function formatLabel(key, mode){
+    if (mode==='day')   { const d=new Date(key); if (!isNaN(d)) return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return key; }
+    if (mode==='month') { const [y,m]=key.split('-'); const d=new Date(Number(y),Number(m)-1,1); return isNaN(d)? key : d.toLocaleDateString(undefined,{month:'short',year:'numeric'}); }
+    if (mode==='year')  return key;
+    return key;
+  }
+
+  function groupRows(rows, mode){
+    const map = new Map(); // label -> {income, expense, net}
+    const labelMap = new Map(); // normalized -> display label (first seen)
+    const push = (label, amt)=>{
+      if (!map.has(label)) map.set(label,{income:0, expense:0, net:0});
+      const e = map.get(label);
+      if (amt>=0) e.income += amt; else e.expense += Math.abs(amt);
+      e.net += amt;
+    };
+
+    for (const r of rows){
+      let key;
+      if (mode==='event'){
+        const raw = r.event||'Unlabeled';
+        const norm = normalizeKey(raw) || 'unlabeled';
+        if (!labelMap.has(norm)) labelMap.set(norm, raw); // keep first spelling/case
+        key = labelMap.get(norm);
+      } else if (mode==='category'){
+        const raw = r.category||'Uncategorized';
+        const norm = normalizeKey(raw) || 'uncategorized';
+        if (!labelMap.has(norm)) labelMap.set(norm, raw);
+        key = labelMap.get(norm);
+      } else if (mode==='day'){
+        key = r.date || 'No date';
+      } else if (mode==='month'){
+        key = r.date ? r.date.slice(0,7) : 'No date';
+      } else if (mode==='year'){
+        key = r.date ? r.date.slice(0,4) : 'No date';
+      } else {
+        key = 'All';
+      }
+      if (typeof r.amount==='number') push(key, r.amount);
+    }
+
+    // Sorting
+    let labels = Array.from(map.keys());
+    if (mode==='day'){
+      labels.sort((a,b)=> new Date(a) - new Date(b));
+    } else if (mode==='month'){
+      labels.sort((a,b)=> a.localeCompare(b)); // YYYY-MM safe
+    } else if (mode==='year'){
+      labels.sort((a,b)=> a.localeCompare(b));
+    } else {
+      labels.sort((a,b)=> a.localeCompare(b)); // alpha for event/category
+    }
+
+    return { labels, stats: map };
+  }
+
+  let chart; // persistent Chart.js instance
+  function renderChart(canvas, grouped, mode, metric){
+    const labels = grouped.labels.map(l => (['day','month','year'].includes(mode) ? formatLabel(l, mode) : l));
+    const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
+    const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
+    const nets     = grouped.labels.map(l => grouped.stats.get(l).net);
+
+    const datasets = [];
+    if (metric==='both' || metric==='income'){
+      datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'stack1' });
+    }
+    if (metric==='both' || metric==='expense'){
+      datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'stack1' });
+    }
+    if (metric==='net'){
+      datasets.push({ type:'line', label:'Net', data: nets, yAxisID:'y1', tension:.25, pointRadius:2 });
+    } else {
+      // also plot net as a faint line for context
+      datasets.push({ type:'line', label:'Net', data: nets, yAxisID:'y1', borderWidth:1, borderDash:[4,4], pointRadius:0 });
+    }
+
+    if (chart) chart.destroy();
+    chart = new Chart(canvas, {
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode:'index', intersect:false },
+        plugins: { legend: { position:'bottom' } },
+        scales: {
+          x: { stacked: metric!=='net' },
+          y: {
+            stacked: metric!=='net',
+            beginAtZero: true,
+            ticks: { callback: v => (v>=0? '$'+v : '$'+v) }
+          },
+          y1: {
+            position:'right',
+            grid: { drawOnChartArea:false },
+            ticks: { callback: v => '$'+v }
+          }
+        }
+      }
+    });
+  }
+
+  function cards(totals){
+    return `
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        ${card('Total Income', currency(totals.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
+        ${card('Total Expenses', currency(totals.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
+        ${card('Net', currency(totals.netAll), totals.netAll>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
+      </div>`;
+  }
   function card(title, value, extra){
     return `<div class="rounded-xl border ${extra} p-4">
       <div class="text-sm opacity-80">${title}</div>
       <div class="text-2xl font-bold mt-1">${value}</div>
     </div>`;
   }
-  function sectionWithChartAndTable(title, labels, datasets, tableHTML){
-    return `<div>
-      <h3 class="text-xl font-bold text-slate-800 mb-2">${escapeHTML(title)}</h3>
-      <div class="bg-white rounded-xl shadow-sm p-4"><canvas id="sectionChart" height="130"></canvas></div>
-      <div class="bg-white rounded-xl shadow-sm p-4 mt-4">${tableHTML}</div>
-    </div>`;
-  }
-  function sectionWithChartOnly(title){
-    return `<div>
-      <h3 class="text-xl font-bold text-slate-800 mb-2">${escapeHTML(title)}</h3>
-      <div class="bg-white rounded-xl shadow-sm p-4"><canvas id="sectionChart" height="130"></canvas></div>
-    </div>`;
-  }
-  function tableFromMap(display, map){
-    const keys = Object.keys(map);
-    const rows = keys.map(k=>{ const s=map[k]; return `<tr>
-      <td class="py-1.5 pr-3">${escapeHTML(display[k])}</td>
-      <td class="py-1.5 pr-3 text-right text-emerald-700">${currency(s.income)}</td>
-      <td class="py-1.5 pr-3 text-right text-rose-700">${currency(s.expense)}</td>
-      <td class="py-1.5 pr-3 text-right ${s.net>=0?'text-indigo-700':'text-amber-700'}">${currency(s.net)}</td>
-    </tr>`; }).join('');
-    return `<table class="w-full text-sm"><thead><tr class="text-left text-slate-500">
-      <th class="font-medium pb-1">Event</th><th class="font-medium pb-1 text-right">Income</th>
-      <th class="font-medium pb-1 text-right">Expenses</th><th class="font-medium pb-1 text-right">Net</th>
-    </tr></thead><tbody>${rows}</tbody></table>`;
-  }
-  function tableFromSimpleMap(keys, map){
-    const rows = keys.map(k=>{ const s=map[k]; return `<tr>
-      <td class="py-1.5 pr-3">${escapeHTML(k)}</td>
-      <td class="py-1.5 pr-3 text-right text-emerald-700">${currency(s.income)}</td>
-      <td class="py-1.5 pr-3 text-right text-rose-700">${currency(s.expense)}</td>
-      <td class="py-1.5 pr-3 text-right ${s.net>=0?'text-indigo-700':'text-amber-700'}">${currency(s.net)}</td>
-    </tr>`; }).join('');
-    return `<table class="w-full text-sm"><thead><tr class="text-left text-slate-500">
-      <th class="font-medium pb-1">Group</th><th class="font-medium pb-1 text-right">Income</th>
-      <th class="font-medium pb-1 text-right">Expenses</th><th class="font-medium pb-1 text-right">Net</th>
-    </tr></thead><tbody>${rows}</tbody></table>`;
-  }
-  function drawChart(canvasId, labels, datasets){
-    const ctx = document.getElementById(canvasId);
-    if(!ctx || typeof Chart==='undefined') return;
-    new Chart(ctx, { type:'bar', data:{ labels, datasets }, options:{ responsive:true, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:true } } } });
-  }
-  function escapeHTML(str){ return String(str??'').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m])); }
 
-  // Build report with view switcher (no non-event split)
+  function eventsOverviewTable(grouped){
+    if (!grouped.labels.length) return `<p class="text-slate-600 mt-2">No events.</p>`;
+    const rows = grouped.labels.map(k=>{
+      const s = grouped.stats.get(k);
+      return `<tr>
+        <td class="py-1.5 pr-3">${esc(k)}</td>
+        <td class="py-1.5 pr-3 text-right text-emerald-700">${currency(s.income)}</td>
+        <td class="py-1.5 pr-3 text-right text-rose-700">${currency(s.expense)}</td>
+        <td class="py-1.5 pr-3 text-right ${s.net>=0?'text-indigo-700':'text-amber-700'}">${currency(s.net)}</td>
+      </tr>`;
+    }).join('');
+    return `<table class="w-full mt-3 text-sm">
+      <thead>
+        <tr class="text-left text-slate-500">
+          <th class="font-medium pb-1">Event (grouped)</th>
+          <th class="font-medium pb-1 text-right">Income</th>
+          <th class="font-medium pb-1 text-right">Expenses</th>
+          <th class="font-medium pb-1 text-right">Net</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function transactionsTable(all){
+    if(!all || !all.length) return `<p class="text-slate-600 mt-2">No transactions.</p>`;
+    const body = all.map(r=> `<tr>
+      <td class="py-1.5 pr-3 whitespace-nowrap">${esc(r.date)}</td>
+      <td class="py-1.5 pr-3">${esc(r.event || 'Unlabeled')}</td>
+      <td class="py-1.5 pr-3">${esc(r.category)}</td>
+      <td class="py-1.5 pr-3">${esc(r.description)}</td>
+      <td class="py-1.5 pr-3 text-right ${r.amount>=0?'text-emerald-700':'text-rose-700'}">${currency(Math.abs(r.amount))} ${r.amount>=0?'(Income)':'(Expense)'}</td>
+      <td class="py-1.5 pr-3">${esc(r.method)}</td>
+      <td class="py-1.5 pr-3 text-slate-500">${esc(r.notes)}</td>
+    </tr>`).join('');
+    return `<table class="w-full mt-3 text-sm">
+      <thead>
+        <tr class="text-left text-slate-500">
+          <th class="font-medium pb-1">Date</th>
+          <th class="font-medium pb-1">Event</th>
+          <th class="font-medium pb-1">Category</th>
+          <th class="font-medium pb-1">Description</th>
+          <th class="font-medium pb-1 text-right">Amount</th>
+          <th class="font-medium pb-1">Method</th>
+          <th class="font-medium pb-1">Notes</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+  }
+
   async function buildReport(file){
     try{
-      progressEl.classList.remove('hidden');
-      errorEl.classList.add('hidden'); errorEl.textContent='';
       const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
-      if(!wb.SheetNames?.length) throw new Error('No sheets found.');
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = parseRows(toAOA(ws));
-      if(!rows.length) throw new Error('No transactions found.');
 
+      // Totals
       const totals = {
-        incomeAll: rows.reduce((a,r)=> a + (r.amount>0? r.amount:0), 0),
-        expenseAll: rows.reduce((a,r)=> a + (r.amount<0? -r.amount:0), 0),
+        incomeAll: sum(rows, r=> r.amount>0 ? r.amount : 0),
+        expenseAll: sum(rows, r=> r.amount<0 ? -r.amount : 0)
       };
       totals.netAll = totals.incomeAll - totals.expenseAll;
 
+      const defaultGroup = inferDefaultGrouping(rows);
+
+      // Build shell
       report.innerHTML = `
         <div class="page bg-white rounded-2xl shadow-sm p-6">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 class="text-2xl font-extrabold text-slate-800">Financial Summary</h2>
-              <p class="text-slate-600">File: ${escapeHTML(file.name)}</p>
+              <h2 class="text-2xl font-extrabold text-slate-800">Monthly Financial Summary</h2>
+              <p class="text-slate-600">File: ${esc(file.name)}</p>
             </div>
-            <div class="flex items-center gap-2">
-              <label for="viewMode" class="text-sm text-slate-600">View:</label>
-              <select id="viewMode" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
-                <option value="date">By Date (default)</option>
-                <option value="event">By Event</option>
-                <option value="income">By Type: Income</option>
-                <option value="expense">By Type: Expense</option>
+            <div class="text-right text-sm text-slate-500">All amounts in USD</div>
+          </div>
+          ${cards(totals)}
+
+          <!-- Chart controls -->
+          <div class="mt-6 flex flex-wrap gap-3 items-end">
+            <div>
+              <label class="text-sm text-slate-600">Group by</label>
+              <select id="groupSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                <option value="auto">Auto (day → month → year)</option>
+                <option value="day">Date (day)</option>
+                <option value="month">Month</option>
+                <option value="year">Year</option>
+                <option value="event">Event name</option>
+                <option value="category">Category</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm text-slate-600">Metric</label>
+              <select id="metricSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                <option value="both">Income & Expenses</option>
+                <option value="income">Income only</option>
+                <option value="expense">Expenses only</option>
+                <option value="net">Net (line)</option>
               </select>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-            ${card('Total Income', currency(totals.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
-            ${card('Total Expenses', currency(totals.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
-            ${card('Net', currency(totals.netAll), totals.netAll>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
+          <div class="mt-4 h-80">
+            <canvas id="summaryChart"></canvas>
           </div>
-
-          <div id="viewContainer" class="mt-8"></div>
         </div>
 
         <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
-          <h3 class="text-xl font-bold text-slate-800">Events Overview</h3>
-          <div id="eventsOverview"></div>
+          <h3 class="text-xl font-bold text-slate-800">Events Overview (Grouped)</h3>
+          <div id="eventsTable" class="mt-2"></div>
+        </div>
+
+        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
+          <h3 class="text-xl font-bold text-slate-800">All Transactions</h3>
+          ${transactionsTable(rows)}
         </div>
       `;
+
+      // Enable Print
       printBtn.disabled = false;
 
-      const viewModeEl = document.getElementById('viewMode');
-      const viewContainer = document.getElementById('viewContainer');
-      const eventsOverview = document.getElementById('eventsOverview');
+      // Initial chart render
+      const groupSelect  = document.getElementById('groupSelect');
+      const metricSelect = document.getElementById('metricSelect');
+      const chartCanvas  = document.getElementById('summaryChart');
+      const evTableDiv   = document.getElementById('eventsTable');
 
-      const renderByEvent = ()=>{
-        const {map, display} = groupByEvent(rows);
-        const labels = Object.keys(map).map(k=> display[k]);
-        const incomes = Object.keys(map).map(k=> map[k].income);
-        const expenses = Object.keys(map).map(k=> map[k].expense);
-        viewContainer.innerHTML = sectionWithChartAndTable('By Event — Income vs Expenses', labels, [
-          {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
-        ], tableFromMap(display, map));
-        drawChart('sectionChart', labels, [
-          {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
-        ]);
+      // Set defaults (auto → resolves to day/month/year)
+      groupSelect.value = 'auto';
+      metricSelect.value= 'both';
+
+      const computeAndRender = ()=>{
+        const chosen = groupSelect.value==='auto' ? defaultGroup : groupSelect.value;
+        const grouped = groupRows(rows, chosen);
+        renderChart(chartCanvas, grouped, chosen, metricSelect.value);
+
+        // Events table always shows grouped by event (case-insensitive)
+        const eventsGrouped = groupRows(rows, 'event');
+        evTableDiv.innerHTML = eventsOverviewTable(eventsGrouped);
       };
-      const renderByType = (type)=>{
-        const {map, display} = groupByTypePerEvent(rows, type);
-        const labels = Object.keys(map).map(k=> display[k]);
-        const values = Object.keys(map).map(k=> map[k]);
-        const title = type==='income' ? 'Income by Event' : 'Expenses by Event';
-        viewContainer.innerHTML = sectionWithChartOnly(title);
-        drawChart('sectionChart', labels, [ {label:title, data: values} ]);
-      };
-      const renderByDate = ()=>{
-        const {map, label} = groupByDate(rows);
-        const keys = Object.keys(map).sort();
-        const incomes = keys.map(k=> map[k].income);
-        const expenses = keys.map(k=> map[k].expense);
-        viewContainer.innerHTML = sectionWithChartAndTable(`By ${label} — Income vs Expenses`, keys, [
-          {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
-        ], tableFromSimpleMap(keys, map));
-        drawChart('sectionChart', keys, [
-          {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
-        ]);
-      };
-      const renderEventsOverview = ()=>{
-        const {map, display} = groupByEvent(rows);
-        const keys = Object.keys(map);
-        if(keys.length===0){ eventsOverview.innerHTML = `<p class="text-slate-600 mt-2">No events in this period.</p>`; return; }
-        const body = keys.map(k=>{
-          const s = map[k];
-          return `<tr>
-            <td class="py-1.5 pr-3">${escapeHTML(display[k])}</td>
-            <td class="py-1.5 pr-3 text-right text-emerald-700">${currency(s.income)}</td>
-            <td class="py-1.5 pr-3 text-right text-rose-700">${currency(s.expense)}</td>
-            <td class="py-1.5 pr-3 text-right ${s.net>=0?'text-indigo-700':'text-amber-700'}">${currency(s.net)}</td>
-          </tr>`;
-        }).join('');
-        eventsOverview.innerHTML = `<table class="w-full mt-3 text-sm">
-          <thead><tr class="text-left text-slate-500">
-            <th class="font-medium pb-1">Event</th>
-            <th class="font-medium pb-1 text-right">Income</th>
-            <th class="font-medium pb-1 text-right">Expenses</th>
-            <th class="font-medium pb-1 text-right">Net</th>
-          </tr></thead><tbody>${body}</tbody></table>`;
-      };
-      function rerender(){
-        const mode = viewModeEl.value;
-        if(mode==='event') renderByEvent();
-        else if(mode==='income') renderByType('income');
-        else if(mode==='expense') renderByType('expense');
-        else renderByDate();   // default
-        renderEventsOverview();
-      }
-      viewModeEl.addEventListener('change', rerender);
-      rerender(); // default By Date
+
+      groupSelect.addEventListener('change', computeAndRender);
+      metricSelect.addEventListener('change', computeAndRender);
+      computeAndRender();
+
       report.classList.remove('hidden');
-      progressEl.classList.add('hidden');
-
     } catch(err){
-      errorEl.textContent = 'Could not read file: ' + ((err&&err.message)||String(err));
+      errorEl.textContent = 'Could not read file. Make sure it uses the one-sheet headers.';
       errorEl.classList.remove('hidden');
-      if(progressEl) progressEl.classList.add('hidden');
       console.error(err);
     }
   }
 
-  // Init
+  // Initial disabled state
   (function init(){ generateBtn.disabled = true; printBtn.disabled = true; })();
 </script>
+</body>
+</html>
