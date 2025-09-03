@@ -66,7 +66,11 @@
 <!-- SheetJS + Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <script>
+  // register datalabels for value labels on bars/pie
+  Chart.register(window.ChartDataLabels);
+
   // --- Elements ---
   const fileInput   = document.getElementById('file-input');
   const statusBox   = document.getElementById('status');
@@ -80,7 +84,6 @@
   const resetBtn    = document.getElementById('resetBtn');
 
   // --- Helpers ---
-  
   const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
   const isCSV   = f => /\.(csv)$/i.test(f.name);
   const formatBytes = b => { if (b===0) return '0 B'; const k=1024,S=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(2)+' '+S[i]; };
@@ -109,22 +112,24 @@
     const [y,m,d] = iso.split('-').map(Number);
     return new Date(Date.UTC(y,m-1,d)).toLocaleDateString(undefined,{timeZone:'UTC', month:'short', day:'numeric', year:'numeric'});
   }
-  
-  // Map of ISO day -> end-of-day total (prefers ledgerTotal, falls back to startTotal + deltas)
-  function buildEndOfDayTotals(rows, startTotal){
-    const ordered = rows.slice().sort((a,b)=> new Date(a.date) - new Date(b.date));
-    let curr = startTotal || 0, prevDay = null;
-    const eod = new Map(); // "YYYY-MM-DD" -> total
-    for(const r of ordered){
-      const day = r.date || '';
-      if (typeof r.ledgerTotal === 'number') curr = r.ledgerTotal;
-      else curr += (r.amount || 0);
-      if (day) eod.set(day, curr);
-      prevDay = day;
-    }
-    return eod;
-  }
 
+  // Build end-of-day totals using ONLY daily deltas from the starting total.
+  function buildEndOfDayTotals(rows, startTotal){
+    const byDay = new Map(); // ISO -> delta for that day
+    for (const r of rows){
+      const d = r.date || '';
+      if (!d) continue;
+      byDay.set(d, (byDay.get(d) || 0) + (r.amount || 0));
+    }
+    const days = Array.from(byDay.keys()).sort((a,b)=> new Date(a)-new Date(b));
+    const eod  = new Map();
+    let curr = startTotal || 0;
+    for (const d of days){
+      curr += byDay.get(d);
+      eod.set(d, curr);
+    }
+    return eod; // map: day ISO -> Total at end of that day
+  }
 
   // Drag UI
   ['dragenter','dragover'].forEach(eName => dropzone.addEventListener(eName, e => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('ring-2','ring-emerald-400','bg-white'); }));
@@ -214,7 +219,6 @@
               else if(label.includes('balance')) total = num;
             }
           }
-          // Fallback: if total missing, add bank+cash
           if(!total && (bank||cash)) total = (bank||0)+(cash||0);
           break outer;
         }
@@ -258,7 +262,7 @@
     return { labels, stats: map };
   }
 
-  // Running balance: prefer ledger column; else compute from start total by day
+  // Running balance (line): prefer ledger column; else compute by day from start
   function computeBalanceSeries(rows, startTotal){
     const withLedger = rows.filter(r=> typeof r.ledgerTotal==='number' && r.date);
     if (withLedger.length){
@@ -283,15 +287,15 @@
     return {labels, data: series};
   }
 
-  // Cash vs Bank balances (start + deltas)
+  // Cash vs Bank balances (start + deltas; Bank includes Zelle/TC/unknown)
   function methodBalances(rows, startCash=0, startBank=0){
     const norm = s => String(s||'').toLowerCase();
     let cash = startCash||0, bank = startBank||0;
     for(const r of rows){
       const m = norm(r.method);
       const amt = r.amount||0;
-      if (m.includes('cash')) cash += amt;
-      else bank += amt; // Bank/Zelle/unknown → bank bucket
+      if (m.includes('cash') || m.includes('efectivo')) cash += amt;
+      else bank += amt; // bank, zelle, tc, blank, etc. → bank bucket
     }
     return { cash, bank };
   }
@@ -303,12 +307,13 @@
       <div class="text-2xl font-bold mt-1">${value}</div>
     </div>`;
   }
-  function totalsCards(t){
+  function totalsCards(t, startTotal){
+    const finalTotal = (startTotal || 0) + (t.incomeAll - t.expenseAll);
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
         ${card('Total Income', currency(t.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
         ${card('Total Expenses', currency(t.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
-        ${card('Net', currency(t.netAll), t.netAll>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
+        ${card('Total (ending)', currency(finalTotal), finalTotal>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
       </div>`;
   }
   function startCards(s){
@@ -322,49 +327,52 @@
 
   // Charts
   let groupChart, pieChart, balChart;
+
   function renderGroupChart(canvas, grouped, mode, metric, eodMap){
     const labels   = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
     const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
     const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
-  
+
+    // Line: Total(EOD) for day; otherwise Net
     let lineLabel = 'Net';
     let lineData  = grouped.labels.map(l => grouped.stats.get(l).net);
     if (mode === 'day' && eodMap){
       lineLabel = 'Total (EOD)';
       lineData  = grouped.labels.map(iso => eodMap.get(iso) ?? null);
     }
-  
-    const longLabels = (mode==='event' || mode==='category');
-    try {
-      const h = longLabels ? Math.min(900, 28*labels.length + 80) : 420;
-      canvas.parentElement.style.height = h + 'px';
-    } catch {}
-  
+
+    // Horizontal for Event/Category (bigger for readability)
+    const horizontal = (mode==='event' || mode==='category');
+    try { canvas.parentElement.style.height = horizontal ? Math.min(1000, 32*labels.length + 120) : 480; } catch {}
+
     const datasets = [];
     if (metric==='both' || metric==='income')  datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'s1' });
     if (metric==='both' || metric==='expense') datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'s1' });
     datasets.push({ type:'line', label: lineLabel, data: lineData, yAxisID:'y1', tension:.25, pointRadius: mode==='day'?2:0, borderDash: mode==='day'?undefined:[4,4] });
-  
+
     if (groupChart) groupChart.destroy();
     groupChart = new Chart(canvas, {
       data: { labels, datasets },
       options: {
         responsive:true, maintainAspectRatio:false,
-        indexAxis: longLabels ? 'y' : 'x',
+        indexAxis: horizontal ? 'y' : 'x',
         interaction:{ mode:'index', intersect:false },
-        plugins:{ legend:{ position:'bottom' } },
+        plugins:{
+          legend:{ position:'bottom' },
+          datalabels:{
+            formatter:(v,ctx)=> ctx.dataset.type==='bar' ? currency(v) : '',
+            anchor: horizontal ? 'center' : 'end',
+            align:  horizontal ? 'center' : 'top',
+            clamp:true,
+            color:'#334155',
+            font:{ weight:'600', size:11 }
+          }
+        },
         scales:{
-          x: longLabels ? { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } }
+          x: horizontal ? { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } }
+                        : { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } },
+          y: horizontal ? { stacked: metric!=='net', ticks:{ autoSkip:false, maxRotation:0, minRotation:0 } }
                         : { stacked: metric!=='net' },
-          y: longLabels ? {
-               stacked: metric!=='net',
-               ticks:{ autoSkip:false, callback:(v,i,ticks)=>{
-                 const s = ticks[i]?.label ?? ''; const str = String(s);
-                 return str.length>24 ? str.slice(0,21)+'…' : str;
-               }}
-             } : {
-               stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v }
-             },
           y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ callback:v=>'$'+v } }
         }
       }
@@ -375,10 +383,26 @@
     if (pieChart) pieChart.destroy();
     pieChart = new Chart(canvas, {
       type:'doughnut',
-      data:{ labels:['Cash','Bank (incl. Zelle)'], datasets:[{ data:[cash, bank] }] },
-      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{ legend:{ position:'bottom' } } }
+      data:{
+        labels:[`Cash (${currency(cash)})`, `Bank (incl. Zelle) (${currency(bank)})`],
+        datasets:[{ data:[cash, bank] }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false, cutout:'60%',
+        plugins:{
+          legend:{ position:'bottom' },
+          datalabels:{
+            formatter:(v,ctx)=>{
+              const total = ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0) || 1;
+              return Math.round(v/total*100) + '%';
+            },
+            anchor:'center', align:'center', clamp:true, font:{ weight:'600' }
+          }
+        }
+      }
     });
   }
+
   function renderBalanceLine(canvas, series){
     if (balChart) balChart.destroy();
     balChart = new Chart(canvas, {
@@ -401,7 +425,6 @@
         incomeAll: sum(rows, r=> r.amount>0 ? r.amount : 0),
         expenseAll: sum(rows, r=> r.amount<0 ? -r.amount : 0)
       };
-      totals.netAll = totals.incomeAll - totals.expenseAll;
 
       // Date range
       const dates = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
@@ -425,7 +448,7 @@
             <div class="text-right text-sm text-slate-500">All amounts in USD</div>
           </div>
 
-          ${totalsCards(totals)}
+          ${totalsCards(totals, start.total)}
           ${startCards(start)}
 
           <!-- Controls -->
@@ -452,8 +475,8 @@
 
           <!-- Charts: main big (2/3) + flow small (1/3) -->
           <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="md:col-span-2 h-[420px]"><canvas id="groupChart"></canvas></div>
-            <div class="h-[420px]"><canvas id="balanceLine"></canvas></div>
+            <div class="md:col-span-2 h-[480px]"><canvas id="groupChart"></canvas></div>
+            <div class="h-[480px]"><canvas id="balanceLine"></canvas></div>
           </div>
           <!-- Donut below -->
           <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -486,28 +509,27 @@
       function recompute(){
         const mode   = groupSelect.value;
         const metric = metricSelect.value;
-      
+
         const grouped = groupRows(rows, mode);
-      
-        // NEW: end-of-day totals map for the "Total (EOD)" line
+
+        // end-of-day totals (pure daily sums)
         const eodMap = buildEndOfDayTotals(rows, start.total);
-      
         renderGroupChart(groupCanvas, grouped, mode, metric, eodMap);
-      
-        // Pie = final balances (start + deltas)
+
+        // final Cash/Bank balances (start + deltas)
         const mb = methodBalances(rows, start.cash, start.bank);
         renderPie(pieCanvas, mb.cash, mb.bank);
-      
-        // Running balance line (still full-width ledger curve)
+
+        // running balance line
         const series = computeBalanceSeries(rows, start.total);
         renderBalanceLine(balCanvas, series);
-      
+
+        // events table
         const evGrouped = groupRows(rows, 'event');
         evTableDiv.innerHTML = eventsOverviewTable(evGrouped);
       }
 
-
-      groupSelect.value = 'day'; // default
+      groupSelect.value = 'day';
       metricSelect.value = 'both';
       groupSelect.addEventListener('change', recompute);
       metricSelect.addEventListener('change', recompute);
