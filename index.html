@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report generator</title>
+  <meta name="description" content="Drop your Excel file to start a pretty monthly report. Nothing uploads anywhere." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes float1 { from { transform: translate(0,0) rotate(0deg);} to { transform: translate(20px, -30px) rotate(8deg);} }
+    @keyframes float2 { from { transform: translate(0,0) rotate(0deg);} to { transform: translate(-25px, 20px) rotate(-10deg);} }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-rose-50 via-indigo-50 to-emerald-50 relative overflow-hidden">
+  <!-- Cute floating blobs -->
+  <div aria-hidden="true" class="pointer-events-none absolute -top-40 -left-40 w-[28rem] h-[28rem] rounded-full blur-3xl opacity-40" style="background: radial-gradient(circle at 30% 30%, #f0abfc, transparent 60%); animation: float1 14s ease-in-out infinite alternate;"></div>
+  <div aria-hidden="true" class="pointer-events-none absolute -bottom-48 -right-48 w-[32rem] h-[32rem] rounded-full blur-3xl opacity-40" style="background: radial-gradient(circle at 70% 70%, #93c5fd, transparent 60%); animation: float2 18s ease-in-out infinite alternate;"></div>
+
+  <main class="relative z-10 flex flex-col items-center px-6 py-16 md:py-24">
+    <header class="text-center max-w-2xl">
+      <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-800 drop-shadow-sm">
+        Report generator
+      </h1>
+      <p class="mt-4 text-slate-700 md:text-lg">
+        Drop your Excel file (.xlsx or .xls) and we’ll turn it into a clean monthly report.
+        <span class="font-medium">All in your browser — nothing gets uploaded.</span>
+      </p>
+    </header>
+
+    <!-- Dropzone Card -->
+    <section class="w-full max-w-2xl mt-10">
+      <label id="dropzone" for="file-input"
+        class="group block rounded-2xl border-2 border-dashed border-slate-300 bg-white/70 backdrop-blur-sm p-8 md:p-10 text-center shadow-sm hover:shadow transition cursor-pointer">
+        <div class="mx-auto w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center border border-slate-200 bg-gradient-to-br from-white to-slate-50 group-hover:scale-105 transition">
+          <!-- Excel-ish icon -->
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-9 h-9 text-emerald-600">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 4v6h6"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 13l3 3m0-3l-3 3M13 13h3"/>
+          </svg>
+        </div>
+        <div class="mt-6">
+          <p class="text-lg md:text-xl font-semibold text-slate-800">Drag & drop your Excel here</p>
+          <p class="text-slate-600 mt-1">or <span class="underline">click to choose a file</span></p>
+          <p class="text-xs text-slate-500 mt-3">Accepted: .xlsx, .xls (max 20MB)</p>
+        </div>
+        <input id="file-input" class="sr-only" type="file" accept=".xlsx,.xls" />
+      </label>
+
+      <!-- File preview / status -->
+      <div id="status" class="mt-6 hidden">
+        <div id="fileCard" class="rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 flex items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">XLS</div>
+            <div class="flex-1 min-w-0">
+              <p id="fileName" class="font-medium text-slate-800 truncate">example.xlsx</p>
+              <p id="fileMeta" class="text-sm text-slate-600">—</p>
+            </div>
+            <button id="resetBtn" class="text-slate-500 hover:text-slate-700 text-sm">Reset</button>
+          </div>
+          <p id="readyMsg" class="text-sm mt-3 text-slate-700">Looks good! Next step: we’ll add the “Generate Report” logic here soon.</p>
+          <button id="generateBtn" disabled class="mt-4 w-full rounded-lg bg-slate-200 text-slate-500 py-2.5 font-medium cursor-not-allowed">Generate report (coming soon)</button>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <p id="error" role="alert" class="mt-4 hidden text-sm text-rose-600"></p>
+    </section>
+
+    <footer class="mt-16 text-center text-xs text-slate-500">
+      <p>Privacy-friendly: files never leave your device.</p>
+    </footer>
+  </main>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const statusBox = document.getElementById('status');
+    const fileNameEl = document.getElementById('fileName');
+    const fileMetaEl = document.getElementById('fileMeta');
+    const errorEl = document.getElementById('error');
+    const resetBtn = document.getElementById('resetBtn');
+
+    // Utilities
+    const formatBytes = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B','KB','MB','GB','TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+    const isExcel = (file) => /\.(xlsx|xls)$/i.test(file.name);
+
+    // Highlight on drag
+    ['dragenter','dragover'].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('ring-2','ring-emerald-400','bg-white');
+      });
+    });
+    ['dragleave','drop'].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('ring-2','ring-emerald-400','bg-white');
+      });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+      handleFile(files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      handleFile(file);
+    });
+
+    const handleFile = (file) => {
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+
+      if (!isExcel(file)) {
+        errorEl.textContent = 'Please select a valid Excel file (.xlsx or .xls).';
+        errorEl.classList.remove('hidden');
+        fileInput.value = '';
+        statusBox.classList.add('hidden');
+        return;
+      }
+
+      // Show basic info (we won’t parse yet)
+      fileNameEl.textContent = file.name;
+      const meta = [formatBytes(file.size), new Date(file.lastModified).toLocaleString()].join(' • ');
+      fileMetaEl.textContent = meta;
+
+      statusBox.classList.remove('hidden');
+
+      // TODO: In the next step, parse workbook in-browser with SheetJS and render the report.
+      // Example (future): const wb = await readXlsx(file);
+    };
+
+    resetBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      statusBox.classList.add('hidden');
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+    });
+  </script>
+</body>
+</html>
