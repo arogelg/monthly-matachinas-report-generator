@@ -66,11 +66,7 @@
 <!-- SheetJS + Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <script>
-  // register datalabels for value labels on bars/pie
-  Chart.register(window.ChartDataLabels);
-
   // --- Elements ---
   const fileInput   = document.getElementById('file-input');
   const statusBox   = document.getElementById('status');
@@ -84,10 +80,14 @@
   const resetBtn    = document.getElementById('resetBtn');
 
   // --- Helpers ---
+  const BLUE = '#60a5fa';     // income
+  const PINK = '#fca5a5';     // expenses
+  const GRAY = '#64748b';
+
   const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
   const isCSV   = f => /\.(csv)$/i.test(f.name);
   const formatBytes = b => { if (b===0) return '0 B'; const k=1024,S=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(2)+' '+S[i]; };
-  const currency = n => (n==null || isNaN(n)) ? '—' : n.toLocaleString(undefined,{style:'currency',currency:'USD'});
+  const money = n => (n==null || isNaN(n)) ? '—' : n.toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2,minimumFractionDigits:2});
   const esc = s => String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
   const normalizeKey = (str)=> String(str||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
   const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
@@ -107,28 +107,10 @@
     const d = new Date(s);
     return isNaN(d) ? '' : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0,10);
   }
-  function formatISOAsLabel(iso){
+  function niceDate(iso){
     if(!iso) return 'No date';
     const [y,m,d] = iso.split('-').map(Number);
     return new Date(Date.UTC(y,m-1,d)).toLocaleDateString(undefined,{timeZone:'UTC', month:'short', day:'numeric', year:'numeric'});
-  }
-
-  // Build end-of-day totals using ONLY daily deltas from the starting total.
-  function buildEndOfDayTotals(rows, startTotal){
-    const byDay = new Map(); // ISO -> delta for that day
-    for (const r of rows){
-      const d = r.date || '';
-      if (!d) continue;
-      byDay.set(d, (byDay.get(d) || 0) + (r.amount || 0));
-    }
-    const days = Array.from(byDay.keys()).sort((a,b)=> new Date(a)-new Date(b));
-    const eod  = new Map();
-    let curr = startTotal || 0;
-    for (const d of days){
-      curr += byDay.get(d);
-      eod.set(d, curr);
-    }
-    return eod; // map: day ISO -> Total at end of that day
   }
 
   // Drag UI
@@ -199,7 +181,7 @@
     return rows.filter(x=> typeof x.amount==='number' || x.category || x.event);
   }
 
-  // Find the "Balance at Moment of Starting the Report / Bank / Cash" block
+  // Find starting totals block (Balance/Bank/Cash)
   function findStartBreakdown(aoa){
     let total=0, bank=0, cash=0;
     outer: for(let r=0;r<Math.min(aoa.length,60);r++){
@@ -207,7 +189,6 @@
         const cell = (aoa[r][c]??'').toString().trim().toLowerCase();
         if(cell.includes('balance at moment of starting the report')){
           const r2 = r+1;
-          // Look for labels on the same header row
           for(let k=0;k<6;k++){
             const label = (aoa[r]?.[c+k]||'').toString().trim().toLowerCase();
             const val   = aoa[r2]?.[c+k];
@@ -231,10 +212,9 @@
     const map = new Map();
     const labelMap = new Map();
     const push = (label, amt)=>{
-      if (!map.has(label)) map.set(label,{income:0, expense:0, net:0});
+      if (!map.has(label)) map.set(label,{income:0, expense:0});
       const e = map.get(label);
       if (amt>=0) e.income += amt; else e.expense += Math.abs(amt);
-      e.net += amt;
     };
     for (const r of rows){
       let key;
@@ -257,22 +237,13 @@
     }
     let labels = Array.from(map.keys());
     if (mode==='day'){ labels.sort((a,b)=> new Date(a) - new Date(b)); }
-    else if (mode==='year'){ labels.sort((a,b)=> a.localeCompare(b)); }
+    else if (mode==='year'){ labels.sort((a,b)=> Number(a) - Number(b)); }
     else { labels.sort((a,b)=> a.localeCompare(b)); }
     return { labels, stats: map };
   }
 
-  // Running balance (line): prefer ledger column; else compute by day from start
+  // Running balance by day (always computed from start + deltas)
   function computeBalanceSeries(rows, startTotal){
-    const withLedger = rows.filter(r=> typeof r.ledgerTotal==='number' && r.date);
-    if (withLedger.length){
-      const ordered = withLedger.slice().sort((a,b)=> new Date(a.date)-new Date(b.date));
-      return {
-        labels: ordered.map(r=> formatISOAsLabel(r.date)),
-        data:   ordered.map(r=> r.ledgerTotal)
-      };
-    }
-    // fallback: compute by-day
     const byDay = new Map();
     for(const r of rows){
       const d = r.date || 'No date';
@@ -280,22 +251,22 @@
       byDay.set(d, byDay.get(d) + (r.amount||0));
     }
     const days = Array.from(byDay.keys()).filter(d=>d!=='No date').sort((a,b)=> new Date(a)-new Date(b));
-    const labels = days.map(d=> formatISOAsLabel(d));
+    const labels = days.map(d=> niceDate(d));
     const series = [];
     let bal = startTotal||0;
     for(const d of days){ bal += byDay.get(d); series.push(bal); }
     return {labels, data: series};
   }
 
-  // Cash vs Bank balances (start + deltas; Bank includes Zelle/TC/unknown)
+  // Cash vs Bank balances (start + deltas)
   function methodBalances(rows, startCash=0, startBank=0){
     const norm = s => String(s||'').toLowerCase();
     let cash = startCash||0, bank = startBank||0;
     for(const r of rows){
       const m = norm(r.method);
       const amt = r.amount||0;
-      if (m.includes('cash') || m.includes('efectivo')) cash += amt;
-      else bank += amt; // bank, zelle, tc, blank, etc. → bank bucket
+      if (m.includes('cash')) cash += amt;
+      else bank += amt; // Bank/Zelle/unknown → bank bucket
     }
     return { cash, bank };
   }
@@ -308,98 +279,169 @@
     </div>`;
   }
   function totalsCards(t, startTotal){
-    const finalTotal = (startTotal || 0) + (t.incomeAll - t.expenseAll);
+    const endTotal = (startTotal||0) + (t.incomeAll - t.expenseAll);
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-        ${card('Total Income', currency(t.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
-        ${card('Total Expenses', currency(t.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
-        ${card('Total (ending)', currency(finalTotal), finalTotal>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
+        ${card('Total Income', money(t.incomeAll), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
+        ${card('Total Expenses', money(t.expenseAll), 'bg-rose-50 text-rose-700 border-rose-200')}
+        ${card('Total (Ending)', money(endTotal), endTotal>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
       </div>`;
   }
   function startCards(s){
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-        ${card('Starting Total', currency(s.total), 'bg-slate-50 text-slate-700 border-slate-200')}
-        ${card('Starting Bank (incl. Zelle)', currency(s.bank), 'bg-slate-50 text-slate-700 border-slate-200')}
-        ${card('Starting Cash', currency(s.cash), 'bg-slate-50 text-slate-700 border-slate-200')}
+        ${card('Starting Total', money(s.total), 'bg-slate-50 text-slate-700 border-slate-200')}
+        ${card('Starting Bank (incl. Zelle)', money(s.bank), 'bg-slate-50 text-slate-700 border-slate-200')}
+        ${card('Starting Cash', money(s.cash), 'bg-slate-50 text-slate-700 border-slate-200')}
       </div>`;
   }
+
+  // --- Custom plugins for labels ---
+  // Bar value labels (2 decimals, colored, move outside if thin)
+  const barValueLabelsPlugin = {
+    id: 'barValueLabels',
+    afterDatasetsDraw(chart, args, pluginOptions){
+      const {ctx, data, chartArea, scales} = chart;
+      const isHorizontal = chart.options.indexAxis === 'y';
+      ctx.save();
+      ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      data.datasets.forEach((ds, di)=>{
+        if (ds.type !== 'bar') return;
+        const color = ds.label?.toLowerCase().includes('income') ? BLUE : PINK;
+        ctx.fillStyle = color;
+        const metas = chart.getDatasetMeta(di).data;
+        metas.forEach((elem, i)=>{
+          const raw = ds.data[i]; if (raw == null) return;
+          const val = typeof raw === 'number' ? raw : Number(raw);
+          const label = money(val).replace(/\.00$/,''); // cleaner if .00
+          if (isHorizontal){
+            const {x, y, base} = elem.getProps(['x','y','base'], true);
+            const width = Math.abs(x - base);
+            let tx = x + (x >= base ? 6 : -6);
+            let align = x >= base ? 'left' : 'right';
+            if (width > 60){ // big bar -> center label
+              tx = base + (x - base)/2;
+              align = 'center';
+            }
+            ctx.textAlign = align; ctx.textBaseline = 'middle';
+            ctx.fillText(label, tx, y);
+          } else {
+            const {x, y, base} = elem.getProps(['x','y','base'], true);
+            const height = Math.abs(y - base);
+            let ty = y - 8;
+            if (height > 34){ // big bar -> inside near top
+              ty = y + (base - y)/2;
+            }
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, x, ty);
+          }
+        });
+      });
+      ctx.restore();
+    }
+  };
+
+  // Running-balance point labels: start, max, end only
+  const balancePointLabelsPlugin = {
+    id: 'balancePointLabels',
+    afterDatasetsDraw(chart){
+      const ds = chart.data.datasets?.[0]; if(!ds) return;
+      const meta = chart.getDatasetMeta(0);
+      const points = meta.data||[];
+      if(!points.length) return;
+      // indices: first, last, and max value
+      let maxIdx = 0;
+      ds.data.forEach((v,i)=>{ if(v>ds.data[maxIdx]) maxIdx = i; });
+      const pick = new Set([0, maxIdx, ds.data.length-1]);
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillStyle = GRAY;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      pick.forEach(i=>{
+        const p = points[i]; if(!p) return;
+        const {x,y} = p.getProps(['x','y'], true);
+        const val = ds.data[i];
+        ctx.fillText(money(val), x, y - 10); // small offset so it never sits on the line
+      });
+      ctx.restore();
+    }
+  };
 
   // Charts
   let groupChart, pieChart, balChart;
 
-  function renderGroupChart(canvas, grouped, mode, metric, eodMap){
-    const labels   = (mode==='day') ? grouped.labels.map(formatISOAsLabel) : grouped.labels;
+  function renderGroupChart(canvas, grouped, mode, show){
+    const labels = (mode==='day') ? grouped.labels.map(niceDate) : grouped.labels;
     const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
     const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
 
-    // Line: Total(EOD) for day; otherwise Net
-    let lineLabel = 'Net';
-    let lineData  = grouped.labels.map(l => grouped.stats.get(l).net);
-    if (mode === 'day' && eodMap){
-      lineLabel = 'Total (EOD)';
-      lineData  = grouped.labels.map(iso => eodMap.get(iso) ?? null);
-    }
-
-    // Horizontal for Event/Category (bigger for readability)
+    // dynamic height for horizontal (more rows -> taller)
     const horizontal = (mode==='event' || mode==='category');
-    try { canvas.parentElement.style.height = horizontal ? Math.min(1000, 32*labels.length + 120) : 480; } catch {}
-
-    const datasets = [];
-    if (metric==='both' || metric==='income')  datasets.push({ type:'bar', label:'Income',  data: incomes,  stack:'s1' });
-    if (metric==='both' || metric==='expense') datasets.push({ type:'bar', label:'Expenses', data: expenses, stack:'s1' });
-    datasets.push({ type:'line', label: lineLabel, data: lineData, yAxisID:'y1', tension:.25, pointRadius: mode==='day'?2:0, borderDash: mode==='day'?undefined:[4,4] });
+    try {
+      const base = 340, per = 46;
+      canvas.parentElement.style.height = horizontal ? (Math.min(1100, base + per * Math.max(0, labels.length-6)))+'px' : '420px';
+    } catch {}
 
     if (groupChart) groupChart.destroy();
     groupChart = new Chart(canvas, {
-      data: { labels, datasets },
+      data: {
+        labels,
+        datasets: [
+          ...(show!=='expense' ? [{type:'bar', label:'Income', data: incomes, backgroundColor: BLUE}] : []),
+          ...(show!=='income'  ? [{type:'bar', label:'Expenses', data: expenses, backgroundColor: PINK}] : []),
+        ]
+      },
       options: {
         responsive:true, maintainAspectRatio:false,
         indexAxis: horizontal ? 'y' : 'x',
         interaction:{ mode:'index', intersect:false },
         plugins:{
           legend:{ position:'bottom' },
-          datalabels:{
-            formatter:(v,ctx)=> ctx.dataset.type==='bar' ? currency(v) : '',
-            anchor: horizontal ? 'center' : 'end',
-            align:  horizontal ? 'center' : 'top',
-            clamp:true,
-            color:'#334155',
-            font:{ weight:'600', size:11 }
-          }
+          tooltip:{ enabled:true }
         },
         scales:{
-          x: horizontal ? { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } }
-                        : { stacked: metric!=='net', beginAtZero:true, ticks:{ callback:v=>'$'+v } },
-          y: horizontal ? { stacked: metric!=='net', ticks:{ autoSkip:false, maxRotation:0, minRotation:0 } }
-                        : { stacked: metric!=='net' },
-          y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ callback:v=>'$'+v } }
+          x: horizontal ? { stacked:true, beginAtZero:true, ticks:{ callback:v=>'$'+v } }
+                        : { stacked:true, beginAtZero:true, ticks:{ callback:v=>'$'+v } },
+          y: horizontal ? { stacked:true, ticks:{ autoSkip:false } }
+                        : { stacked:true }
         }
-      }
+      },
+      plugins:[barValueLabelsPlugin]
     });
   }
 
   function renderPie(canvas, cash, bank){
     if (pieChart) pieChart.destroy();
+    const labels = [`Cash: ${money(cash)}`, `Bank (incl. Zelle): ${money(bank)}`];
+    const total = Math.max(0.0001, cash + bank);
+    const donutLabelsPlugin = {
+      id:'donutLabels',
+      afterDatasetsDraw(chart){
+        const {ctx, data} = chart;
+        const meta = chart.getDatasetMeta(0);
+        ctx.save();
+        ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#0f172a';
+        meta.data.forEach((arc, i)=>{
+          const p = arc.getProps(['x','y','startAngle','endAngle','innerRadius','outerRadius'], true);
+          const angle = (p.startAngle + p.endAngle)/2;
+          const r = (p.innerRadius + p.outerRadius)/2;
+          const x = p.x + Math.cos(angle)*r;
+          const y = p.y + Math.sin(angle)*r;
+          const val = data.datasets[0].data[i];
+          const pct = ((val/total)*100).toFixed(1)+'%';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(pct, x, y);
+        });
+        ctx.restore();
+      }
+    };
     pieChart = new Chart(canvas, {
       type:'doughnut',
-      data:{
-        labels:[`Cash (${currency(cash)})`, `Bank (incl. Zelle) (${currency(bank)})`],
-        datasets:[{ data:[cash, bank] }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false, cutout:'60%',
-        plugins:{
-          legend:{ position:'bottom' },
-          datalabels:{
-            formatter:(v,ctx)=>{
-              const total = ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0) || 1;
-              return Math.round(v/total*100) + '%';
-            },
-            anchor:'center', align:'center', clamp:true, font:{ weight:'600' }
-          }
-        }
-      }
+      data:{ labels, datasets:[{ data:[cash, bank], backgroundColor:[BLUE, PINK] }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{ legend:{ position:'bottom' } } },
+      plugins:[donutLabelsPlugin]
     });
   }
 
@@ -407,8 +449,13 @@
     if (balChart) balChart.destroy();
     balChart = new Chart(canvas, {
       type:'line',
-      data:{ labels: series.labels, datasets:[{ label:'Running Balance', data: series.data, tension:.25, pointRadius:2 }] },
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:false, ticks:{ callback:v=>'$'+v } } } }
+      data:{ labels: series.labels, datasets:[{ label:'Running Balance', data: series.data, borderColor:'#3b82f6', backgroundColor:'transparent', tension:.25, pointRadius:3 }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'bottom' }, tooltip:{ enabled:true } },
+        scales:{ y:{ beginAtZero:false, ticks:{ callback:v=>'$'+v } }, x:{ ticks:{ maxRotation:50, minRotation:50 } } }
+      },
+      plugins:[balancePointLabelsPlugin]
     });
   }
 
@@ -428,7 +475,7 @@
 
       // Date range
       const dates = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
-      const rangeLabel = dates.length ? `${formatISOAsLabel(dates[0])} – ${formatISOAsLabel(dates[dates.length-1])}` : '—';
+      const rangeLabel = dates.length ? `${niceDate(dates[0])} – ${niceDate(dates[dates.length-1])}` : '—';
 
       // Build report shell
       report.innerHTML = `
@@ -452,14 +499,14 @@
           ${startCards(start)}
 
           <!-- Controls -->
-          <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 no-print">
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
             <div>
               <label class="text-sm text-slate-600">Group by</label>
               <select id="groupSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
                 <option value="day">Date (day)</option>
+                <option value="year">Year</option>
                 <option value="event">Event name</option>
                 <option value="category">Category</option>
-                <option value="year">Year</option>
               </select>
             </div>
             <div>
@@ -468,19 +515,18 @@
                 <option value="both">Income & Expenses</option>
                 <option value="income">Income only</option>
                 <option value="expense">Expenses only</option>
-                <option value="net">Net (line)</option>
               </select>
             </div>
           </div>
 
           <!-- Charts: main big (2/3) + flow small (1/3) -->
           <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="md:col-span-2 h-[480px]"><canvas id="groupChart"></canvas></div>
-            <div class="h-[480px]"><canvas id="balanceLine"></canvas></div>
+            <div class="md:col-span-2 h-[420px]"><canvas id="groupChart"></canvas></div>
+            <div class="h-[420px]"><canvas id="balanceLine"></canvas></div>
           </div>
           <!-- Donut below -->
           <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="h-72"><canvas id="methodPie"></canvas></div>
+            <div class="h-72 md:col-span-1"><canvas id="methodPie"></canvas></div>
           </div>
         </div>
 
@@ -511,20 +557,14 @@
         const metric = metricSelect.value;
 
         const grouped = groupRows(rows, mode);
+        renderGroupChart(groupCanvas, grouped, mode, metric);
 
-        // end-of-day totals (pure daily sums)
-        const eodMap = buildEndOfDayTotals(rows, start.total);
-        renderGroupChart(groupCanvas, grouped, mode, metric, eodMap);
-
-        // final Cash/Bank balances (start + deltas)
         const mb = methodBalances(rows, start.cash, start.bank);
         renderPie(pieCanvas, mb.cash, mb.bank);
 
-        // running balance line
         const series = computeBalanceSeries(rows, start.total);
         renderBalanceLine(balCanvas, series);
 
-        // events table
         const evGrouped = groupRows(rows, 'event');
         evTableDiv.innerHTML = eventsOverviewTable(evGrouped);
       }
@@ -549,9 +589,8 @@
       const s = grouped.stats.get(k);
       return `<tr>
         <td class="py-1.5 pr-3">${esc(k)}</td>
-        <td class="py-1.5 pr-3 text-right text-emerald-700">${currency(s.income)}</td>
-        <td class="py-1.5 pr-3 text-right text-rose-700">${currency(s.expense)}</td>
-        <td class="py-1.5 pr-3 text-right ${s.net>=0?'text-indigo-700':'text-amber-700'}">${currency(s.net)}</td>
+        <td class="py-1.5 pr-3 text-right" style="color:${BLUE}">${money(s.income)}</td>
+        <td class="py-1.5 pr-3 text-right" style="color:${PINK}">${money(s.expense)}</td>
       </tr>`;
     }).join('');
     return `<table class="w-full mt-3 text-sm">
@@ -560,7 +599,6 @@
           <th class="font-medium pb-1">Event (grouped)</th>
           <th class="font-medium pb-1 text-right">Income</th>
           <th class="font-medium pb-1 text-right">Expenses</th>
-          <th class="font-medium pb-1 text-right">Net</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -573,9 +611,9 @@
       <td class="py-1.5 pr-3 whitespace-nowrap">${esc(r.date)}</td>
       <td class="py-1.5 pr-3">${esc(r.event || 'Unlabeled')}</td>
       <td class="py-1.5 pr-3">${esc(r.category)}</td>
-      <td class="py-1.5 pr-3 text-right ${r.amount>=0?'text-emerald-700':'text-rose-700'}">${currency(Math.abs(r.amount))} ${r.amount>=0?'(Income)':'(Expense)'}</td>
+      <td class="py-1.5 pr-3 text-right" style="color:${r.amount>=0?BLUE:PINK}">${money(Math.abs(r.amount))} ${r.amount>=0?'(Income)':'(Expense)'}</td>
       <td class="py-1.5 pr-3">${esc(r.method)}</td>
-      <td class="py-1.5 pr-3 text-right ${typeof r.ledgerTotal==='number'?'':'text-slate-400'}">${typeof r.ledgerTotal==='number' ? currency(r.ledgerTotal) : ''}</td>
+      <td class="py-1.5 pr-3 text-right ${typeof r.ledgerTotal==='number'?'':'text-slate-400'}">${typeof r.ledgerTotal==='number' ? money(r.ledgerTotal) : ''}</td>
     </tr>`).join('');
     return `<table class="w-full mt-3 text-sm">
       <thead>
