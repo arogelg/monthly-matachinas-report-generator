@@ -4,11 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Report generator</title>
-  <meta name="description" content="Drop your Excel file to start a pretty monthly report. Nothing uploads anywhere." />
+  <meta name="description" content="Drop your Excel file to create a clean printable monthly report. Runs 100% in your browser." />
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @keyframes float1 { from { transform: translate(0,0) rotate(0deg);} to { transform: translate(20px, -30px) rotate(8deg);} }
     @keyframes float2 { from { transform: translate(0,0) rotate(0deg);} to { transform: translate(-25px, 20px) rotate(-10deg);} }
+    @page { size: Letter; margin: 16mm; }
+    @media print {
+      body { background: white !important; }
+      #controls, #dropzone, #status, #error, header, #hint { display: none !important; }
+      #report { box-shadow: none !important; width: auto !important; }
+      .page { page-break-after: always; }
+      .page:last-child { page-break-after: auto; }
+    }
   </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-rose-50 via-indigo-50 to-emerald-50 relative overflow-hidden">
@@ -18,17 +26,22 @@
 
   <main class="relative z-10 flex flex-col items-center px-6 py-16 md:py-24">
     <header class="text-center max-w-2xl">
-      <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-800 drop-shadow-sm">
-        Report generator
-      </h1>
+      <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-800 drop-shadow-sm">Report generator</h1>
       <p class="mt-4 text-slate-700 md:text-lg">
-        Drop your Excel file (.xlsx or .xls) and we’ll turn it into a clean monthly report.
+        Drop your Excel file (.xlsx or .xls) and get a pretty, printable monthly report.
         <span class="font-medium">All in your browser — nothing gets uploaded.</span>
       </p>
     </header>
 
+    <!-- Controls -->
+    <div id="controls" class="mt-8 flex flex-wrap items-center gap-3">
+      <button id="generateBtn" disabled class="rounded-lg bg-slate-200 text-slate-500 py-2.5 px-4 font-medium cursor-not-allowed">Generate report</button>
+      <button id="printBtn" disabled class="rounded-lg bg-emerald-600 text-white py-2.5 px-4 font-medium">Print / Save PDF</button>
+      <span id="hint" class="text-sm text-slate-600">Upload an Excel to enable actions.</span>
+    </div>
+
     <!-- Dropzone Card -->
-    <section class="w-full max-w-2xl mt-10">
+    <section class="w-full max-w-2xl mt-6">
       <label id="dropzone" for="file-input"
         class="group block rounded-2xl border-2 border-dashed border-slate-300 bg-white/70 backdrop-blur-sm p-8 md:p-10 text-center shadow-sm hover:shadow transition cursor-pointer">
         <div class="mx-auto w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center border border-slate-200 bg-gradient-to-br from-white to-slate-50 group-hover:scale-105 transition">
@@ -58,8 +71,7 @@
             </div>
             <button id="resetBtn" class="text-slate-500 hover:text-slate-700 text-sm">Reset</button>
           </div>
-          <p id="readyMsg" class="text-sm mt-3 text-slate-700">Looks good! Next step: we’ll add the “Generate Report” logic here soon.</p>
-          <button id="generateBtn" disabled class="mt-4 w-full rounded-lg bg-slate-200 text-slate-500 py-2.5 font-medium cursor-not-allowed">Generate report (coming soon)</button>
+          <p class="text-sm mt-3 text-slate-700">Ready to generate a printable report. Click <span class="font-medium">Generate report</span>.</p>
         </div>
       </div>
 
@@ -67,10 +79,20 @@
       <p id="error" role="alert" class="mt-4 hidden text-sm text-rose-600"></p>
     </section>
 
+    <!-- Report output -->
+    <section id="report" class="w-[210mm] bg-white shadow-sm rounded-2xl mt-12 p-8 md:p-10 hidden print:shadow-none print:rounded-none print:p-0">
+      <!-- Filled by JS -->
+    </section>
+
     <footer class="mt-16 text-center text-xs text-slate-500">
       <p>Privacy-friendly: files never leave your device.</p>
     </footer>
   </main>
+
+  <!-- SheetJS for client-side Excel parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Chart.js for simple charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <script>
     const dropzone = document.getElementById('dropzone');
@@ -80,74 +102,211 @@
     const fileMetaEl = document.getElementById('fileMeta');
     const errorEl = document.getElementById('error');
     const resetBtn = document.getElementById('resetBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const printBtn = document.getElementById('printBtn');
+    const report = document.getElementById('report');
 
-    // Utilities
     const formatBytes = (bytes) => {
       if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B','KB','MB','GB','TB'];
+      const k = 1024, sizes = ['B','KB','MB','GB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
+
     const isExcel = (file) => /\.(xlsx|xls)$/i.test(file.name);
 
-    // Highlight on drag
-    ['dragenter','dragover'].forEach(evt => {
-      dropzone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.add('ring-2','ring-emerald-400','bg-white');
-      });
-    });
-    ['dragleave','drop'].forEach(evt => {
-      dropzone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.remove('ring-2','ring-emerald-400','bg-white');
-      });
-    });
+    // Drag highlight
+    ['dragenter','dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.add('ring-2','ring-emerald-400','bg-white');
+    }));
+    ['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('ring-2','ring-emerald-400','bg-white');
+    }));
 
-    dropzone.addEventListener('drop', (e) => {
-      const files = e.dataTransfer.files;
-      if (!files || !files.length) return;
-      handleFile(files[0]);
-    });
+    dropzone.addEventListener('drop', (e) => { const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); });
+    fileInput.addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) handleFile(f); });
 
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      handleFile(file);
-    });
-
-    const handleFile = (file) => {
-      errorEl.classList.add('hidden');
-      errorEl.textContent = '';
-
-      if (!isExcel(file)) {
-        errorEl.textContent = 'Please select a valid Excel file (.xlsx or .xls).';
-        errorEl.classList.remove('hidden');
-        fileInput.value = '';
-        statusBox.classList.add('hidden');
-        return;
-      }
-
-      // Show basic info (we won’t parse yet)
+    function handleFile(file){
+      errorEl.classList.add('hidden'); errorEl.textContent = '';
+      if(!isExcel(file)) { errorEl.textContent = 'Please select a valid Excel file (.xlsx or .xls).'; errorEl.classList.remove('hidden'); fileInput.value = ''; statusBox.classList.add('hidden'); generateBtn.disabled = true; generateBtn.classList.add('cursor-not-allowed','bg-slate-200','text-slate-500'); printBtn.disabled = true; return; }
       fileNameEl.textContent = file.name;
-      const meta = [formatBytes(file.size), new Date(file.lastModified).toLocaleString()].join(' • ');
-      fileMetaEl.textContent = meta;
-
+      fileMetaEl.textContent = [formatBytes(file.size), new Date(file.lastModified).toLocaleString()].join(' • ');
       statusBox.classList.remove('hidden');
-
-      // TODO: In the next step, parse workbook in-browser with SheetJS and render the report.
-      // Example (future): const wb = await readXlsx(file);
-    };
+      generateBtn.disabled = false; generateBtn.classList.remove('cursor-not-allowed','bg-slate-200','text-slate-500'); generateBtn.classList.add('bg-emerald-600','text-white');
+      generateBtn.onclick = async () => { await buildReport(file); };
+    }
 
     resetBtn.addEventListener('click', () => {
       fileInput.value = '';
       statusBox.classList.add('hidden');
       errorEl.classList.add('hidden');
       errorEl.textContent = '';
+      report.classList.add('hidden');
+      report.innerHTML = '';
+      generateBtn.disabled = true; generateBtn.classList.add('cursor-not-allowed','bg-slate-200','text-slate-500');
+      printBtn.disabled = true;
+      window.scrollTo({top: 0, behavior: 'smooth'});
     });
+
+    printBtn.addEventListener('click', () => window.print());
+
+    // --- Excel parsing helpers ---
+    const readWorkbook = async (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try { const data = new Uint8Array(e.target.result); const wb = XLSX.read(data, {type:'array'}); resolve(wb);} catch(err){ reject(err);} };
+      reader.onerror = reject; reader.readAsArrayBuffer(file);
+    });
+
+    function sheetToAOA(ws){ return XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:null}); }
+
+    function parseSheetRows(aoa){
+      // Expect columns: [desc, amount, note?] → graceful if more/less
+      const entries = [];
+      for(const row of aoa){
+        if(!row || row.length===0) continue;
+        const desc = (row[0] ?? '').toString().trim();
+        const rawAmt = row[1];
+        let amt = null;
+        if (typeof rawAmt === 'number') amt = rawAmt;
+        else if (typeof rawAmt === 'string') {
+          const n = parseFloat(rawAmt.replace(/[^0-9\-\.]/g,''));
+          amt = isNaN(n) ? null : n;
+        }
+        const note = row[2] != null ? String(row[2]) : '';
+        if(!desc && (amt==null || isNaN(amt))) continue;
+        // Skip header-like rows
+        const isHeader = /^(descripcion|concepto|detalle|monto|notas?|total|saldo)/i.test(desc);
+        entries.push({desc, amount: isNaN(amt)? null : amt, note, isHeader});
+      }
+      return entries.filter(r => !(r.isHeader && r.amount==null));
+    }
+
+    function summarize(entries){
+      const incomes = entries.filter(r => typeof r.amount==='number' && r.amount>0).reduce((a,b)=>a+b.amount,0);
+      const expenses = entries.filter(r => typeof r.amount==='number' && r.amount<0).reduce((a,b)=>a+b.amount,0);
+      const net = incomes + expenses; // expenses negative
+      return {incomes, expenses: Math.abs(expenses), net};
+    }
+
+    function currency(n){ if(n==null || isNaN(n)) return '—'; return n.toLocaleString(undefined,{style:'currency', currency:'USD'}); }
+
+    // Build the printable report
+    async function buildReport(file){
+      const wb = await readWorkbook(file);
+      const sheets = wb.SheetNames.filter(n => n && !/^Sheet\d+$/i.test(n));
+      const now = new Date();
+
+      // Parse all sheets
+      const sections = [];
+      for(const name of sheets){
+        const aoa = sheetToAOA(wb.Sheets[name]);
+        const rows = parseSheetRows(aoa);
+        const nonEmpty = rows.filter(r => r.desc || typeof r.amount==='number');
+        const sums = summarize(nonEmpty);
+        sections.push({name, rows: nonEmpty, sums});
+      }
+
+      const grand = sections.reduce((acc,s)=>{ acc.incomes += s.sums.incomes; acc.expenses += s.sums.expenses; acc.net += s.sums.net; return acc;}, {incomes:0, expenses:0, net:0});
+
+      report.innerHTML = `
+        <div class="page">
+          <div class="flex items-start justify-between">
+            <div>
+              <h2 class="text-2xl font-extrabold text-slate-800">Monthly Financial Report</h2>
+              <p class="text-slate-600">Generated: ${now.toLocaleDateString()} • File: ${escapeHTML(file.name)}</p>
+            </div>
+            <div class="text-right">
+              <div class="text-xs text-slate-500">All amounts in USD</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+            ${card("Total Income", currency(grand.incomes), "bg-emerald-50 text-emerald-700 border-emerald-200")}
+            ${card("Total Expenses", currency(grand.expenses), "bg-rose-50 text-rose-700 border-rose-200")}
+            ${card("Net", currency(grand.net), (grand.net>=0?"bg-indigo-50 text-indigo-700 border-indigo-200":"bg-amber-50 text-amber-700 border-amber-200"))}
+          </div>
+
+          <div class="mt-8">
+            <canvas id="summaryChart" height="120"></canvas>
+          </div>
+        </div>
+        ${sections.map(s => sectionHTML(s)).join('')}
+      `;
+
+      // Enable print
+      printBtn.disabled = false;
+
+      // Chart
+      const ctx = document.getElementById('summaryChart');
+      if(ctx){
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: sections.map(s=>s.name),
+            datasets: [
+              { label: 'Income', data: sections.map(s=>s.sums.incomes) },
+              { label: 'Expenses', data: sections.map(s=>s.sums.expenses) },
+              { label: 'Net', data: sections.map(s=>s.sums.net) }
+            ]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { position: 'bottom' } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      }
+
+      report.classList.remove('hidden');
+      report.scrollIntoView({behavior:'smooth'});
+    }
+
+    function card(title, value, extra){
+      return `<div class="rounded-xl border ${extra} p-4">
+        <div class="text-sm opacity-80">${title}</div>
+        <div class="text-2xl font-bold mt-1">${value}</div>
+      </div>`;
+    }
+
+    function sectionHTML(s){
+      const rows = s.rows
+        .filter(r => r.desc)
+        .map(r => `<tr>
+          <td class="py-1.5 pr-3 align-top text-slate-700">${escapeHTML(r.desc)}</td>
+          <td class="py-1.5 pr-3 align-top text-right ${r.amount>0?'text-emerald-700':'text-rose-700'}">${r.amount==null?'—':currency(r.amount)}</td>
+          <td class="py-1.5 align-top text-slate-500">${r.note?escapeHTML(r.note):''}</td>
+        </tr>`).join('');
+
+      return `<div class="page mt-10">
+        <h3 class="text-xl font-bold text-slate-800">${escapeHTML(s.name)}</h3>
+        <table class="w-full mt-3 text-sm">
+          <thead>
+            <tr class="text-left text-slate-500">
+              <th class="font-medium pb-1">Descripción</th>
+              <th class="font-medium pb-1 text-right">Monto</th>
+              <th class="font-medium pb-1">Notas</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+          ${card('Ingresos', currency(s.sums.incomes), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
+          ${card('Gastos', currency(s.sums.expenses), 'bg-rose-50 text-rose-700 border-rose-200')}
+          ${card('Neto', currency(s.sums.net), s.sums.net>=0?'bg-indigo-50 text-indigo-700 border-indigo-200':'bg-amber-50 text-amber-700 border-amber-200')}
+        </div>
+      </div>`;
+    }
+
+    function escapeHTML(str){
+      return String(str).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
+    }
+
+    // Initial state
+    (function init(){
+      generateBtn.disabled = true; printBtn.disabled = true;
+      generateBtn.classList.add('cursor-not-allowed','bg-slate-200','text-slate-500');
+    })();
   </script>
 </body>
 </html>
