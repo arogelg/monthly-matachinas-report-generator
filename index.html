@@ -117,7 +117,7 @@
     return {map, label: useMonthly ? 'Month' : 'Date'};
   }
 
-  // Render helpers
+  // UI helpers
   function card(title, value, extra){
     return `<div class="rounded-xl border ${extra} p-4">
       <div class="text-sm opacity-80">${title}</div>
@@ -131,7 +131,7 @@
       <div class="bg-white rounded-xl shadow-sm p-4 mt-4">${tableHTML}</div>
     </div>`;
   }
-  function sectionWithChartOnly(title, labels, values){
+  function sectionWithChartOnly(title){
     return `<div>
       <h3 class="text-xl font-bold text-slate-800 mb-2">${escapeHTML(title)}</h3>
       <div class="bg-white rounded-xl shadow-sm p-4"><canvas id="sectionChart" height="130"></canvas></div>
@@ -172,13 +172,12 @@
   // Build report with view switcher (no non-event split)
   async function buildReport(file){
     try{
-      if (typeof XLSX === 'undefined') { throw new Error('Excel library failed to load.'); }
-      progressEl.classList.remove('hidden'); errorEl.classList.add('hidden'); errorEl.textContent='';
-
+      progressEl.classList.remove('hidden');
+      errorEl.classList.add('hidden'); errorEl.textContent='';
       const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
       if(!wb.SheetNames?.length) throw new Error('No sheets found.');
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = parseRows(toAOA(ws)).map(r=> ({...r, eventKey: normalize(r.event)}));
+      const rows = parseRows(toAOA(ws));
       if(!rows.length) throw new Error('No transactions found.');
 
       const totals = {
@@ -237,16 +236,14 @@
           {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
         ]);
       };
-
       const renderByType = (type)=>{
         const {map, display} = groupByTypePerEvent(rows, type);
         const labels = Object.keys(map).map(k=> display[k]);
         const values = Object.keys(map).map(k=> map[k]);
         const title = type==='income' ? 'Income by Event' : 'Expenses by Event';
-        viewContainer.innerHTML = sectionWithChartOnly(title, labels, values);
+        viewContainer.innerHTML = sectionWithChartOnly(title);
         drawChart('sectionChart', labels, [ {label:title, data: values} ]);
       };
-
       const renderByDate = ()=>{
         const {map, label} = groupByDate(rows);
         const keys = Object.keys(map).sort();
@@ -259,7 +256,6 @@
           {label:'Income', data: incomes}, {label:'Expenses', data: expenses}
         ]);
       };
-
       const renderEventsOverview = ()=>{
         const {map, display} = groupByEvent(rows);
         const keys = Object.keys(map);
@@ -281,7 +277,6 @@
             <th class="font-medium pb-1 text-right">Net</th>
           </tr></thead><tbody>${body}</tbody></table>`;
       };
-
       function rerender(){
         const mode = viewModeEl.value;
         if(mode==='event') renderByEvent();
@@ -303,6 +298,6 @@
     }
   }
 
-  // Init disabled state
+  // Init
   (function init(){ generateBtn.disabled = true; printBtn.disabled = true; })();
 </script>
