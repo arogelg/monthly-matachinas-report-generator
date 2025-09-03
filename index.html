@@ -117,43 +117,68 @@
   const readWorkbook = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsArrayBuffer(file); });
   const readCSV      = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(file); });
   const toAOA        = ws => XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  // --- DATE HELPERS ---
+  
+  // Excel serial number -> ISO yyyy-mm-dd (UTC)
+  function excelSerialToISO(n){
+    const o = XLSX.SSF.parse_date_code(n);
+    if(!o) return '';
+    const d = new Date(Date.UTC(o.y, (o.m||1)-1, o.d||1, o.H||0, o.M||0, Math.floor(o.S||0)));
+    return d.toISOString().slice(0,10);
+  }
+  // Any cell -> ISO yyyy-mm-dd (handles serials, Date objects, strings)
+  function normalizeDateCell(val){
+    if (val == null || val === '') return '';
+    if (typeof val === 'number') return excelSerialToISO(val);         // Excel serial
+    if (val instanceof Date && !isNaN(val)) return val.toISOString().slice(0,10);
+    const s = String(val).trim();
+    // If already ISO like 2025-09-03, keep it
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Let SheetJS/JS parse other printable dates and force to ISO (UTC)
+    const d = new Date(s);
+    return isNaN(d) ? '' : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0,10);
+  }
 
   // Parse rows (we treat every row as part of an "event occasion")
   function parseRows(aoa){
-    if(!aoa || !aoa.length) return [];
-    const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
-    const idx = {
-      date: headers.findIndex(h=>/^date/i.test(h)),
-      event: headers.findIndex(h=>/^event name/i.test(h)),
-      type: headers.findIndex(h=>/^entry type/i.test(h)),
-      cat: headers.findIndex(h=>/^category/i.test(h)),
-      desc: headers.findIndex(h=>/^description/i.test(h)),
-      amt: headers.findIndex(h=>/^amount/i.test(h)),
-      pay: headers.findIndex(h=>/^payment method/i.test(h)),
-      notes: headers.findIndex(h=>/^notes/i.test(h)),
-    };
-    const rows=[];
-    for(let i=1;i<aoa.length;i++){
-      const r = aoa[i]||[];
-      const rawAmt = r[idx.amt];
-      let amt = null;
-      if(typeof rawAmt==='number') amt = rawAmt;
-      else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-\.]/g,'')); amt = isNaN(n)? null : n; }
-      const typ = (r[idx.type]||'').toString().trim().toLowerCase();
-      const signedAmt = (typ==='expense') ? (amt!=null ? -amt : null) : amt;
-      rows.push({
-        date: r[idx.date] ? String(r[idx.date]).slice(0,10) : '',
-        event: (r[idx.event]||'').toString().trim(),
-        type: typ, // income|expense
-        category: (r[idx.cat]||'').toString().trim(),
-        description: (r[idx.desc]||'').toString().trim(),
-        amount: signedAmt,
-        method: (r[idx.pay]||'').toString().trim(),
-        notes: (r[idx.notes]||'').toString().trim()
-      });
-    }
-    return rows.filter(x=> x.description || (typeof x.amount==='number'));
+  if(!aoa || !aoa.length) return [];
+  const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
+  const idx = {
+    date: headers.findIndex(h=>/^date/i.test(h)),
+    event: headers.findIndex(h=>/^event name/i.test(h)),
+    type: headers.findIndex(h=>/^entry type/i.test(h)),
+    cat:  headers.findIndex(h=>/^category/i.test(h)),
+    desc: headers.findIndex(h=>/^description/i.test(h)),
+    amt:  headers.findIndex(h=>/^amount/i.test(h)),
+    pay:  headers.findIndex(h=>/^payment method/i.test(h)),
+    notes:headers.findIndex(h=>/^notes/i.test(h)),
+  };
+  const rows=[];
+  for(let i=1;i<aoa.length;i++){
+    const r = aoa[i]||[];
+    // --- amount ---
+    const rawAmt = r[idx.amt];
+    let amt = null;
+    if(typeof rawAmt==='number') amt = rawAmt;
+    else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-\.]/g,'')); amt = isNaN(n)? null : n; }
+
+    const typ = (r[idx.type]||'').toString().trim().toLowerCase();
+    const signedAmt = (typ==='expense') ? (amt!=null ? -amt : null) : amt;
+
+    rows.push({
+      date: normalizeDateCell(idx.date>-1 ? r[idx.date] : ''),   // <-- fix
+      event: (r[idx.event]||'').toString().trim(),
+      type:  typ,
+      category: (r[idx.cat]||'').toString().trim(),
+      description: (r[idx.desc]||'').toString().trim(),
+      amount: signedAmt,
+      method: (r[idx.pay]||'').toString().trim(),
+      notes: (r[idx.notes]||'').toString().trim()
+    });
   }
+  return rows.filter(x=> x.description || (typeof x.amount==='number'));
+}
+
 
   const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
   const esc = (s)=> String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
