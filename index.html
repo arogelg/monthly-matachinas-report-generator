@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Report Generator</title>
+  <title>Printable Monthly Report</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <meta name="description" content="Drop your one-sheet Excel/CSV and get a clean, printable monthly report. All in the browser."/>
+  <meta name="description" content="Drop your one-sheet Excel/CSV and get a clean, printable monthly report."/>
   <style>
     html, body { height:auto; overflow:auto; }
     @page { size: Letter; margin:16mm; }
@@ -25,7 +25,7 @@
   <header class="text-center no-print">
     <h1 class="text-4xl md:text-5xl font-extrabold text-slate-800">Monthly Report Generator</h1>
     <p class="mt-3 text-slate-700">
-      Upload your <span class="font-medium">one-sheet</span> Excel/CSV and get a pretty, printable report with flexible grouping.
+      Upload your <span class="font-medium">one-sheet</span> Excel/CSV and get a pretty, printable report.
     </p>
   </header>
 
@@ -35,7 +35,7 @@
       <label for="file-input" class="cursor-pointer rounded-lg bg-white border border-slate-200 px-4 py-2 shadow hover:shadow-md">Choose file</label>
       <input id="file-input" type="file" accept=".xlsx,.xls,.csv" class="hidden"/>
       <button id="generateBtn" disabled class="rounded-lg px-4 py-2 bg-slate-200 text-slate-500 cursor-not-allowed">Generate report</button>
-      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Download PDF</button>
+      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Print</button>
       <span class="text-sm text-slate-600">Accepted: .xlsx, .xls, .csv</span>
     </div>
 
@@ -63,9 +63,8 @@
   <section id="report" class="mt-12 hidden"></section>
 </main>
 
-<!-- SheetJS + Chart.js -->
+<!-- SheetJS only (no charts) -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
   // --- Elements ---
   const fileInput   = document.getElementById('file-input');
@@ -82,7 +81,9 @@
   // --- Helpers ---
   const BLUE = '#60a5fa';     // income
   const PINK = '#fca5a5';     // expenses
-  const GRAY = '#64748b';
+  const INDIGO = '#818cf8';   // ending total
+  const BANK = '#bfdbfe';     // ending bank
+  const CASH = '#fde68a';     // ending cash
 
   const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
   const isCSV   = f => /\.(csv)$/i.test(f.name);
@@ -92,7 +93,7 @@
   const normalizeKey = (str)=> String(str||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
   const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
 
-  // --- DATE: force UTC so there’s no “day before” drift ---
+  // --- DATE helpers ---
   function excelSerialToISO(n){
     const o = XLSX.SSF.parse_date_code(n); if(!o) return '';
     const d = new Date(Date.UTC(o.y,(o.m||1)-1,o.d||1,o.H||0,o.M||0,Math.floor(o.S||0)));
@@ -138,7 +139,7 @@
   const readCSV      = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(file); });
   const toAOA        = ws => XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
 
-  // Parse rows (+ optional Total in account)
+  // Parse rows
   function parseRows(aoa){
     if(!aoa || !aoa.length) return [];
     const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
@@ -222,40 +223,14 @@
         const raw = r.event||'Unlabeled', norm = normalizeKey(raw)||'unlabeled';
         if (!labelMap.has(norm)) labelMap.set(norm, raw);
         key = labelMap.get(norm);
-      } else if (mode==='category'){
-        const raw = r.category||'Uncategorized', norm = normalizeKey(raw)||'uncategorized';
-        if (!labelMap.has(norm)) labelMap.set(norm, raw);
-        key = labelMap.get(norm);
-      } else if (mode==='day'){
-        key = r.date || 'No date';
-      } else if (mode==='year'){
-        key = r.date ? r.date.slice(0,4) : 'No date';
       } else {
         key = 'All';
       }
       if (typeof r.amount==='number') push(key, r.amount);
     }
     let labels = Array.from(map.keys());
-    if (mode==='day'){ labels.sort((a,b)=> new Date(a) - new Date(b)); }
-    else if (mode==='year'){ labels.sort((a,b)=> Number(a) - Number(b)); }
-    else { labels.sort((a,b)=> a.localeCompare(b)); }
+    labels.sort((a,b)=> a.localeCompare(b));
     return { labels, stats: map };
-  }
-
-  // Running balance by day (always computed from start + deltas)
-  function computeBalanceSeries(rows, startTotal){
-    const byDay = new Map();
-    for(const r of rows){
-      const d = r.date || 'No date';
-      if(!byDay.has(d)) byDay.set(d,0);
-      byDay.set(d, byDay.get(d) + (r.amount||0));
-    }
-    const days = Array.from(byDay.keys()).filter(d=>d!=='No date').sort((a,b)=> new Date(a)-new Date(b));
-    const labels = days.map(d=> niceDate(d));
-    const series = [];
-    let bal = startTotal||0;
-    for(const d of days){ bal += byDay.get(d); series.push(bal); }
-    return {labels, data: series};
   }
 
   // Cash vs Bank balances (start + deltas)
@@ -287,6 +262,13 @@
         ${card('Total (Ending)', money(endTotal), endTotal>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
       </div>`;
   }
+  function endingBreakdownCards(mb){
+    return `
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        ${card('Ending Bank (incl. Zelle)', money(mb.bank), 'bg-blue-50 text-blue-700 border-blue-200')}
+        ${card('Ending Cash', money(mb.cash), 'bg-yellow-50 text-yellow-700 border-yellow-200')}
+      </div>`;
+  }
   function startCards(s){
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
@@ -294,169 +276,6 @@
         ${card('Starting Bank (incl. Zelle)', money(s.bank), 'bg-slate-50 text-slate-700 border-slate-200')}
         ${card('Starting Cash', money(s.cash), 'bg-slate-50 text-slate-700 border-slate-200')}
       </div>`;
-  }
-
-  // --- Custom plugins for labels ---
-  // Bar value labels (2 decimals, colored, move outside if thin)
-  const barValueLabelsPlugin = {
-    id: 'barValueLabels',
-    afterDatasetsDraw(chart, args, pluginOptions){
-      const {ctx, data, chartArea, scales} = chart;
-      const isHorizontal = chart.options.indexAxis === 'y';
-      ctx.save();
-      ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      data.datasets.forEach((ds, di)=>{
-        if (ds.type !== 'bar') return;
-        const color = ds.label?.toLowerCase().includes('income') ? BLUE : PINK;
-        ctx.fillStyle = color;
-        const metas = chart.getDatasetMeta(di).data;
-        metas.forEach((elem, i)=>{
-          const raw = ds.data[i]; if (raw == null) return;
-          const val = typeof raw === 'number' ? raw : Number(raw);
-          const label = money(val).replace(/\.00$/,''); // cleaner if .00
-          if (isHorizontal){
-            const {x, y, base} = elem.getProps(['x','y','base'], true);
-            const width = Math.abs(x - base);
-            let tx = x + (x >= base ? 6 : -6);
-            let align = x >= base ? 'left' : 'right';
-            if (width > 60){ // big bar -> center label
-              tx = base + (x - base)/2;
-              align = 'center';
-            }
-            ctx.textAlign = align; ctx.textBaseline = 'middle';
-            ctx.fillText(label, tx, y);
-          } else {
-            const {x, y, base} = elem.getProps(['x','y','base'], true);
-            const height = Math.abs(y - base);
-            let ty = y - 8;
-            if (height > 34){ // big bar -> inside near top
-              ty = y + (base - y)/2;
-            }
-            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(label, x, ty);
-          }
-        });
-      });
-      ctx.restore();
-    }
-  };
-
-  // Running-balance point labels: start, max, end only
-  const balancePointLabelsPlugin = {
-    id: 'balancePointLabels',
-    afterDatasetsDraw(chart){
-      const ds = chart.data.datasets?.[0]; if(!ds) return;
-      const meta = chart.getDatasetMeta(0);
-      const points = meta.data||[];
-      if(!points.length) return;
-      // indices: first, last, and max value
-      let maxIdx = 0;
-      ds.data.forEach((v,i)=>{ if(v>ds.data[maxIdx]) maxIdx = i; });
-      const pick = new Set([0, maxIdx, ds.data.length-1]);
-      const ctx = chart.ctx;
-      ctx.save();
-      ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillStyle = GRAY;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      pick.forEach(i=>{
-        const p = points[i]; if(!p) return;
-        const {x,y} = p.getProps(['x','y'], true);
-        const val = ds.data[i];
-        ctx.fillText(money(val), x, y - 10); // small offset so it never sits on the line
-      });
-      ctx.restore();
-    }
-  };
-
-  // Charts
-  let groupChart, pieChart, balChart;
-
-  function renderGroupChart(canvas, grouped, mode, show){
-    const labels = (mode==='day') ? grouped.labels.map(niceDate) : grouped.labels;
-    const incomes  = grouped.labels.map(l => grouped.stats.get(l).income);
-    const expenses = grouped.labels.map(l => grouped.stats.get(l).expense);
-
-    // dynamic height for horizontal (more rows -> taller)
-    const horizontal = (mode==='event' || mode==='category');
-    try {
-      const base = 340, per = 46;
-      canvas.parentElement.style.height = horizontal ? (Math.min(1100, base + per * Math.max(0, labels.length-6)))+'px' : '420px';
-    } catch {}
-
-    if (groupChart) groupChart.destroy();
-    groupChart = new Chart(canvas, {
-      data: {
-        labels,
-        datasets: [
-          ...(show!=='expense' ? [{type:'bar', label:'Income', data: incomes, backgroundColor: BLUE}] : []),
-          ...(show!=='income'  ? [{type:'bar', label:'Expenses', data: expenses, backgroundColor: PINK}] : []),
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        indexAxis: horizontal ? 'y' : 'x',
-        interaction:{ mode:'index', intersect:false },
-        plugins:{
-          legend:{ position:'bottom' },
-          tooltip:{ enabled:true }
-        },
-        scales:{
-          x: horizontal ? { stacked:true, beginAtZero:true, ticks:{ callback:v=>'$'+v } }
-                        : { stacked:true, beginAtZero:true, ticks:{ callback:v=>'$'+v } },
-          y: horizontal ? { stacked:true, ticks:{ autoSkip:false } }
-                        : { stacked:true }
-        }
-      },
-      plugins:[barValueLabelsPlugin]
-    });
-  }
-
-  function renderPie(canvas, cash, bank){
-    if (pieChart) pieChart.destroy();
-    const labels = [`Cash: ${money(cash)}`, `Bank (incl. Zelle): ${money(bank)}`];
-    const total = Math.max(0.0001, cash + bank);
-    const donutLabelsPlugin = {
-      id:'donutLabels',
-      afterDatasetsDraw(chart){
-        const {ctx, data} = chart;
-        const meta = chart.getDatasetMeta(0);
-        ctx.save();
-        ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#0f172a';
-        meta.data.forEach((arc, i)=>{
-          const p = arc.getProps(['x','y','startAngle','endAngle','innerRadius','outerRadius'], true);
-          const angle = (p.startAngle + p.endAngle)/2;
-          const r = (p.innerRadius + p.outerRadius)/2;
-          const x = p.x + Math.cos(angle)*r;
-          const y = p.y + Math.sin(angle)*r;
-          const val = data.datasets[0].data[i];
-          const pct = ((val/total)*100).toFixed(1)+'%';
-          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(pct, x, y);
-        });
-        ctx.restore();
-      }
-    };
-    pieChart = new Chart(canvas, {
-      type:'doughnut',
-      data:{ labels, datasets:[{ data:[cash, bank], backgroundColor:[BLUE, PINK] }] },
-      options:{ responsive:true, maintainAspectRatio:false, cutout:'60%', plugins:{ legend:{ position:'bottom' } } },
-      plugins:[donutLabelsPlugin]
-    });
-  }
-
-  function renderBalanceLine(canvas, series){
-    if (balChart) balChart.destroy();
-    balChart = new Chart(canvas, {
-      type:'line',
-      data:{ labels: series.labels, datasets:[{ label:'Running Balance', data: series.data, borderColor:'#3b82f6', backgroundColor:'transparent', tension:.25, pointRadius:3 }] },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ position:'bottom' }, tooltip:{ enabled:true } },
-        scales:{ y:{ beginAtZero:false, ticks:{ callback:v=>'$'+v } }, x:{ ticks:{ maxRotation:50, minRotation:50 } } }
-      },
-      plugins:[balancePointLabelsPlugin]
-    });
   }
 
   async function buildReport(file){
@@ -477,7 +296,13 @@
       const dates = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
       const rangeLabel = dates.length ? `${niceDate(dates[0])} – ${niceDate(dates[dates.length-1])}` : '—';
 
-      // Build report shell
+      // Ending breakdown
+      const mb = methodBalances(rows, start.cash, start.bank);
+
+      // Grouped events overview
+      const evGrouped = groupRows(rows, 'event');
+
+      // Build report
       report.innerHTML = `
         <!-- Print header -->
         <div class="print-only mb-4">
@@ -496,84 +321,18 @@
           </div>
 
           ${totalsCards(totals, start.total)}
+          ${endingBreakdownCards(mb)}
           ${startCards(start)}
-
-          <!-- Controls -->
-          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
-            <div>
-              <label class="text-sm text-slate-600">Group by</label>
-              <select id="groupSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
-                <option value="day">Date (day)</option>
-                <option value="year">Year</option>
-                <option value="event">Event name</option>
-                <option value="category">Category</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-sm text-slate-600">Metric</label>
-              <select id="metricSelect" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white">
-                <option value="both">Income & Expenses</option>
-                <option value="income">Income only</option>
-                <option value="expense">Expenses only</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Charts: main big (2/3) + flow small (1/3) -->
-          <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="md:col-span-2 h-[420px]"><canvas id="groupChart"></canvas></div>
-            <div class="h-[420px]"><canvas id="balanceLine"></canvas></div>
-          </div>
-          <!-- Donut below -->
-          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="h-72 md:col-span-1"><canvas id="methodPie"></canvas></div>
-          </div>
         </div>
 
         <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
           <h3 class="text-xl font-bold text-slate-800">Events Overview (Grouped)</h3>
-          <div id="eventsTable" class="mt-2"></div>
-        </div>
-
-        <div class="page bg-white rounded-2xl shadow-sm p-6 mt-8">
-          <h3 class="text-xl font-bold text-slate-800">All Transactions</h3>
-          ${transactionsTable(rows)}
+          <div id="eventsTable" class="mt-2">${eventsOverviewTable(evGrouped)}</div>
         </div>
       `;
 
-      // Enable PDF
+      // Enable Print
       printBtn.disabled = false;
-
-      // Wire up charts
-      const groupSelect  = document.getElementById('groupSelect');
-      const metricSelect = document.getElementById('metricSelect');
-      const groupCanvas  = document.getElementById('groupChart');
-      const pieCanvas    = document.getElementById('methodPie');
-      const balCanvas    = document.getElementById('balanceLine');
-      const evTableDiv   = document.getElementById('eventsTable');
-
-      function recompute(){
-        const mode   = groupSelect.value;
-        const metric = metricSelect.value;
-
-        const grouped = groupRows(rows, mode);
-        renderGroupChart(groupCanvas, grouped, mode, metric);
-
-        const mb = methodBalances(rows, start.cash, start.bank);
-        renderPie(pieCanvas, mb.cash, mb.bank);
-
-        const series = computeBalanceSeries(rows, start.total);
-        renderBalanceLine(balCanvas, series);
-
-        const evGrouped = groupRows(rows, 'event');
-        evTableDiv.innerHTML = eventsOverviewTable(evGrouped);
-      }
-
-      groupSelect.value = 'day';
-      metricSelect.value = 'both';
-      groupSelect.addEventListener('change', recompute);
-      metricSelect.addEventListener('change', recompute);
-      recompute();
 
       report.classList.remove('hidden');
     } catch(err){
@@ -587,46 +346,21 @@
     if (!grouped.labels.length) return `<p class="text-slate-600 mt-2">No events.</p>`;
     const rows = grouped.labels.map(k=>{
       const s = grouped.stats.get(k);
-      return `<tr>
-        <td class="py-1.5 pr-3">${esc(k)}</td>
-        <td class="py-1.5 pr-3 text-right" style="color:${BLUE}">${money(s.income)}</td>
-        <td class="py-1.5 pr-3 text-right" style="color:${PINK}">${money(s.expense)}</td>
+      return `<tr class="hover:bg-slate-50">
+        <td class="py-2 pr-3">${esc(k)}</td>
+        <td class="py-2 pr-3 text-right font-semibold" style="color:${BLUE}">${money(s.income)}</td>
+        <td class="py-2 pr-3 text-right font-semibold" style="color:${PINK}">${money(s.expense)}</td>
       </tr>`;
     }).join('');
-    return `<table class="w-full mt-3 text-sm">
+    return `<table class="w-full mt-3 text-sm rounded-xl overflow-hidden">
       <thead>
-        <tr class="text-left text-slate-500">
-          <th class="font-medium pb-1">Event (grouped)</th>
-          <th class="font-medium pb-1 text-right">Income</th>
-          <th class="font-medium pb-1 text-right">Expenses</th>
+        <tr class="text-left text-slate-500 bg-slate-100">
+          <th class="font-medium px-3 py-2">Event (grouped)</th>
+          <th class="font-medium px-3 py-2 text-right">Income</th>
+          <th class="font-medium px-3 py-2 text-right">Expenses</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  }
-
-  function transactionsTable(all){
-    if(!all || !all.length) return `<p class="text-slate-600 mt-2">No transactions.</p>`;
-    const body = all.map(r=> `<tr>
-      <td class="py-1.5 pr-3 whitespace-nowrap">${esc(r.date)}</td>
-      <td class="py-1.5 pr-3">${esc(r.event || 'Unlabeled')}</td>
-      <td class="py-1.5 pr-3">${esc(r.category)}</td>
-      <td class="py-1.5 pr-3 text-right" style="color:${r.amount>=0?BLUE:PINK}">${money(Math.abs(r.amount))} ${r.amount>=0?'(Income)':'(Expense)'}</td>
-      <td class="py-1.5 pr-3">${esc(r.method)}</td>
-      <td class="py-1.5 pr-3 text-right ${typeof r.ledgerTotal==='number'?'':'text-slate-400'}">${typeof r.ledgerTotal==='number' ? money(r.ledgerTotal) : ''}</td>
-    </tr>`).join('');
-    return `<table class="w-full mt-3 text-sm">
-      <thead>
-        <tr class="text-left text-slate-500">
-          <th class="font-medium pb-1">Date</th>
-          <th class="font-medium pb-1">Event</th>
-          <th class="font-medium pb-1">Category</th>
-          <th class="font-medium pb-1 text-right">Amount</th>
-          <th class="font-medium pb-1">Method</th>
-          <th class="font-medium pb-1 text-right">Total in account</th>
-        </tr>
-      </thead>
-      <tbody>${body}</tbody>
+      <tbody class="divide-y divide-slate-200">${rows}</tbody>
     </table>`;
   }
 
