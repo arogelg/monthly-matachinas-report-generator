@@ -236,6 +236,43 @@
     </table>`;
   }
 
+  /* ---------- NUEVO: tabla de transacciones ---------- */
+  function tablaTransacciones(all, tituloMes){
+    if(!all?.length) return `<p class="text-slate-600 mt-2">Sin transacciones.</p>`;
+    const filas = all.map(r=>`
+      <tr class="hover:bg-slate-50">
+        <td class="py-1 px-2 whitespace-nowrap">${esc(r.date||'—')}</td>
+        <td class="py-1 px-2">${esc(r.event||'—')}</td>
+        <td class="py-1 px-2">${esc(r.category||'')}</td>
+        <td class="py-1 px-2 text-right font-semibold" style="color:${(r.amount||0)>=0?'#16a34a':'#dc2626'}">
+          ${money(Math.abs(r.amount||0))} ${(r.amount||0)>=0?'(Ingreso)':'(Gasto)'}
+        </td>
+        <td class="py-1 px-2">${esc(r.method||'')}</td>
+        <td class="py-1 px-2 text-right ${typeof r.ledgerTotal==='number'?'':'text-slate-400'}">
+          ${typeof r.ledgerTotal==='number'? money(r.ledgerTotal):''}
+        </td>
+      </tr>
+    `).join('');
+    return `
+      <div class="mt-6">
+        <h3 class="text-xl font-bold text-slate-800">Transacciones ${esc(tituloMes)}</h3>
+        <table class="w-full mt-2 text-sm rounded-xl overflow-hidden">
+          <thead>
+            <tr class="bg-slate-100 text-slate-500">
+              <th class="px-2 py-1 text-left">Fecha</th>
+              <th class="px-2 py-1 text-left">Evento</th>
+              <th class="px-2 py-1 text-left">Categoría</th>
+              <th class="px-2 py-1 text-right">Monto</th>
+              <th class="px-2 py-1 text-left">Método</th>
+              <th class="px-2 py-1 text-right">Total en cuenta</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">${filas}</tbody>
+        </table>
+      </div>`;
+  }
+  /* --------------------------------------------------- */
+
   async function buildReport(file){
     try{
       const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
@@ -252,7 +289,7 @@
       let y1,m1,y2,m2;
       if(mesInicial.value){ [y1,m1]=mesInicial.value.split('-').map(Number); }
       if(mesFinal.value){   [y2,m2]=mesFinal.value.split('-').map(Number); }
-      if(!y1||!m1){ // derivar
+      if(!y1||!m1){
         if(fechas.length){ const a=new Date(fechas[0]); y1=a.getUTCFullYear(); m1=a.getUTCMonth()+1; }
         else { const n=new Date(); y1=n.getUTCFullYear(); m1=n.getUTCMonth()+1; }
         mesInicial.value=`${y1}-${String(m1).padStart(2,'0')}`;
@@ -262,7 +299,7 @@
         else { y2=y1; m2=m1; }
         mesFinal.value=`${y2}-${String(m2).padStart(2,'0')}`;
       }
-      const tituloMes = mesNombre(y1,m1); // <-- SOLO mes inicial
+      const tituloMes = mesNombre(y1,m1); // SOLO mes inicial
 
       const mb=methodBalances(rows,start.cash,start.bank);
       const ev=agruparEventos(rows);
@@ -296,6 +333,8 @@
             <h3 class="text-xl font-bold text-slate-800">Resumen por Evento (Agrupado)</h3>
             ${tablaEventos(ev)}
           </div>
+
+          ${tablaTransacciones(rows, tituloMes)}
         </div>
       `;
 
