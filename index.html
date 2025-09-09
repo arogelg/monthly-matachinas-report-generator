@@ -3,27 +3,28 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Reporte Financiero Matachinas</title>
+  <title>Resumen Financiero</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <meta name="description" content="Carga tu Excel/CSV de una sola hoja y obtén un reporte mensual listo para imprimir."/>
   <style>
     html, body { height:auto; overflow:auto; }
-    @page { size: Letter; margin:12mm; } /* márgenes más pequeños para caber en 1 hoja */
+    /* --- PRINT: 1 sola hoja Letter --- */
+    @page { size: Letter; margin:10mm; }
     .print-only { display:none; }
     @media print {
       body { background:#fff !important; }
       #uploader, #error, #controls, .no-print { display:none !important; }
       #reporte { box-shadow:none !important; width:auto !important; }
-      .sheet { page-break-after:auto; }
-      /* Compactación para 1 hoja */
-      :root { font-size: 13px; }
-      .card { padding: .8rem !important; }
-      .gap-6 { gap: 1rem !important; }
-      .gap-4 { gap: .75rem !important; }
-      .p-6 { padding: 1rem !important; }
-      .rounded-2xl { border-radius: 14px !important; }
-      table { font-size: 12px !important; }
-      th, td { padding-top:.4rem !important; padding-bottom:.4rem !important; }
+      /* Compactación */
+      :root { font-size: 11.5px; }
+      .p-6 { padding: .9rem !important; }
+      .gap-6 { gap: .9rem !important; }
+      .gap-4 { gap: .6rem !important; }
+      .card { padding: .7rem !important; }
+      .rounded-2xl { border-radius: 12px !important; }
+      table { font-size: 11px !important; }
+      th, td { padding-top:.35rem !important; padding-bottom:.35rem !important; }
+      /* 5 tarjetas en una fila sí o sí */
+      .cards-5 { display:grid !important; grid-template-columns:repeat(5,1fr) !important; gap:.6rem !important; }
     }
   </style>
 </head>
@@ -31,30 +32,24 @@
 <main class="max-w-6xl mx-auto px-6 py-10">
   <header class="text-center no-print">
     <h1 class="text-4xl md:text-5xl font-extrabold text-slate-800">Generador de Reporte Mensual</h1>
-    <p class="mt-3 text-slate-700">
-      Sube tu archivo <span class="font-medium">Excel/CSV (una sola hoja)</span> y obtén un reporte imprimible.
-    </p>
+    <p class="mt-3 text-slate-700">Sube tu Excel/CSV (una sola hoja) y obtén un reporte imprimible.</p>
   </header>
 
-  <!-- Controles / Uploader -->
+  <!-- Controles -->
   <section id="uploader" class="mt-8">
-    <div id="controls" class="flex flex-wrap gap-3 items-end">
-      <div class="flex items-center gap-3">
-        <label for="file-input" class="cursor-pointer rounded-lg bg-white border border-slate-200 px-4 py-2 shadow hover:shadow-md">Elegir archivo</label>
-        <input id="file-input" type="file" accept=".xlsx,.xls,.csv" class="hidden"/>
-        <button id="generateBtn" disabled class="rounded-lg px-4 py-2 bg-slate-200 text-slate-500 cursor-not-allowed">Generar reporte</button>
-        <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Imprimir</button>
-      </div>
+    <div id="controls" class="flex flex-wrap items-end gap-3">
+      <label for="file-input" class="cursor-pointer rounded-lg bg-white border border-slate-200 px-4 py-2 shadow hover:shadow-md">Elegir archivo</label>
+      <input id="file-input" type="file" accept=".xlsx,.xls,.csv" class="hidden"/>
+      <button id="generateBtn" disabled class="rounded-lg px-4 py-2 bg-slate-200 text-slate-500 cursor-not-allowed">Generar</button>
+      <button id="printBtn" disabled class="rounded-lg px-4 py-2 bg-emerald-600 text-white">Imprimir</button>
 
-      <!-- Mes inicial / final -->
-      <div class="grid grid-cols-2 gap-3">
-        <label class="text-sm text-slate-600">Mes inicial
-          <input id="mesInicial" type="month" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white"/>
-        </label>
-        <label class="text-sm text-slate-600">Mes final
-          <input id="mesFinal" type="month" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white"/>
-        </label>
-      </div>
+      <label class="text-sm text-slate-600">Mes inicial
+        <input id="mesInicial" type="month" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white"/>
+      </label>
+      <label class="text-sm text-slate-600">Mes final
+        <input id="mesFinal" type="month" class="block mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white"/>
+      </label>
+
       <span class="text-sm text-slate-600">Aceptados: .xlsx, .xls, .csv</span>
     </div>
 
@@ -69,8 +64,7 @@
       </div>
     </div>
 
-    <!-- Drag & drop -->
-    <label id="dropzone" for="file-input" class="mt-6 block text-center rounded-2xl border-2 border-dashed border-slate-300 bg-white/70 backdrop-blur-sm p-10 shadow-sm hover:shadow transition cursor-pointer">
+    <label id="dropzone" for="file-input" class="mt-6 block text-center rounded-2xl border-2 border-dashed border-slate-300 bg-white/70 p-10 shadow-sm hover:shadow transition cursor-pointer">
       <p class="text-lg font-semibold text-slate-800">Arrastra y suelta tu Excel/CSV aquí</p>
       <p class="text-slate-600 mt-1">o haz clic para elegir</p>
     </label>
@@ -78,144 +72,98 @@
     <p id="error" class="mt-3 hidden text-sm text-rose-600"></p>
   </section>
 
-  <!-- Reporte -->
   <section id="reporte" class="mt-10 hidden"></section>
 </main>
 
-<!-- SheetJS (sin charts) -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
   // --- Elementos ---
-  const fileInput   = document.getElementById('file-input');
-  const statusBox   = document.getElementById('status');
-  const fileNameEl  = document.getElementById('fileName');
-  const fileMetaEl  = document.getElementById('fileMeta');
-  const errorEl     = document.getElementById('error');
-  const generateBtn = document.getElementById('generateBtn');
-  const printBtn    = document.getElementById('printBtn');
-  const reporte     = document.getElementById('reporte');
-  const dropzone    = document.getElementById('dropzone');
-  const resetBtn    = document.getElementById('resetBtn');
-  const mesInicial  = document.getElementById('mesInicial');
-  const mesFinal    = document.getElementById('mesFinal');
+  const fileInput = document.getElementById('file-input');
+  const statusBox = document.getElementById('status');
+  const fileNameEl= document.getElementById('fileName');
+  const fileMetaEl= document.getElementById('fileMeta');
+  const errorEl   = document.getElementById('error');
+  const generateBtn=document.getElementById('generateBtn');
+  const printBtn  = document.getElementById('printBtn');
+  const reporte   = document.getElementById('reporte');
+  const dropzone  = document.getElementById('dropzone');
+  const resetBtn  = document.getElementById('resetBtn');
+  const mesInicial= document.getElementById('mesInicial');
+  const mesFinal  = document.getElementById('mesFinal');
 
   // --- Helpers ---
-  const BLUE = '#60a5fa';     // ingresos
-  const PINK = '#fca5a5';     // egresos
-
+  const BLUE = '#60a5fa', PINK = '#fca5a5';
   const isExcel = f => /\.(xlsx|xls)$/i.test(f.name);
   const isCSV   = f => /\.(csv)$/i.test(f.name);
-  const formatBytes = b => { if (b===0) return '0 B'; const k=1024,S=['B','KB','MB','GB']; const i=Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(2)+' '+S[i]; };
-  const money = n => (n==null || isNaN(n)) ? '—' : n.toLocaleString('es-MX',{style:'currency',currency:'USD',maximumFractionDigits:2,minimumFractionDigits:2});
+  const money = n => (n==null||isNaN(n))?'—':n.toLocaleString('es-MX',{style:'currency',currency:'USD',minimumFractionDigits:2});
   const esc = s => String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-  const normalizeKey = (str)=> String(str||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
-  const sum = (arr, pred)=> arr.reduce((a,b)=> a + (pred(b)||0), 0);
-  const mesNombre = (y, m) => new Date(Date.UTC(y, m-1, 1)).toLocaleDateString('es', { month:'long', year:'numeric', timeZone:'UTC' });
-  const rangoMesesTexto = (y1,m1,y2,m2) => (y1===y2 && m1===m2) ? mesNombre(y1,m1) : (mesNombre(y1,m1) + ' – ' + mesNombre(y2,m2));
+  const normalizeKey = s=> String(s||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  const sum = (arr,p)=> arr.reduce((a,b)=> a+(p(b)||0),0);
+  const mesNombre=(y,m)=> new Date(Date.UTC(y,m-1,1)).toLocaleDateString('es',{month:'long',year:'numeric',timeZone:'UTC'}).replace(/^./,c=>c.toUpperCase());
 
-  // --- Fechas ---
-  function excelSerialToISO(n){
-    const o = XLSX.SSF.parse_date_code(n); if(!o) return '';
-    const d = new Date(Date.UTC(o.y,(o.m||1)-1,o.d||1,o.H||0,o.M||0,Math.floor(o.S||0)));
-    return d.toISOString().slice(0,10);
-  }
-  function normalizeDateCell(val){
-    if (val == null || val === '') return '';
-    if (typeof val === 'number') return excelSerialToISO(val);
-    if (val instanceof Date && !isNaN(val)) return new Date(Date.UTC(val.getUTCFullYear(), val.getUTCMonth(), val.getUTCDate())).toISOString().slice(0,10);
-    const s = String(val).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    const d = new Date(s);
-    return isNaN(d) ? '' : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0,10);
-  }
+  function excelSerialToISO(n){ const o=XLSX.SSF.parse_date_code(n); if(!o) return ''; const d=new Date(Date.UTC(o.y,(o.m||1)-1,o.d||1)); return d.toISOString().slice(0,10); }
+  function normalizeDateCell(v){ if(v==null||v==='') return ''; if(typeof v==='number') return excelSerialToISO(v); const s=String(v).trim(); if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const d=new Date(s); return isNaN(d)?'':new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())).toISOString().slice(0,10); }
 
-  // Drag UI
-  ['dragenter','dragover'].forEach(eName => dropzone.addEventListener(eName, e => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('ring-2','ring-emerald-400','bg-white'); }));
-  ['dragleave','drop'].forEach(eName => dropzone.addEventListener(eName, e => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('ring-2','ring-emerald-400','bg-white'); }));
-  dropzone.addEventListener('drop', e => { const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f); });
-  fileInput.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) handleFile(f); });
-  if (resetBtn) resetBtn.addEventListener('click', () => location.reload());
-  printBtn.addEventListener('click', () => window.print());
+  // Drag & inputs
+  ['dragenter','dragover'].forEach(n=>dropzone.addEventListener(n,e=>{e.preventDefault();e.stopPropagation();dropzone.classList.add('ring-2','ring-emerald-400','bg-white');}));
+  ['dragleave','drop'].forEach(n=>dropzone.addEventListener(n,e=>{e.preventDefault();e.stopPropagation();dropzone.classList.remove('ring-2','ring-emerald-400','bg-white');}));
+  dropzone.addEventListener('drop', e=>{ const f=e.dataTransfer?.files?.[0]; if(f) handleFile(f); });
+  fileInput.addEventListener('change', e=>{ const f=e.target.files?.[0]; if(f) handleFile(f); });
+  if(resetBtn) resetBtn.addEventListener('click',()=>location.reload());
+  printBtn.addEventListener('click',()=>window.print());
 
   function handleFile(file){
-    errorEl.classList.add('hidden'); errorEl.textContent='';
     if(!(isExcel(file)||isCSV(file))){ errorEl.textContent='Selecciona .xlsx, .xls o .csv'; errorEl.classList.remove('hidden'); return; }
-    fileNameEl.textContent = file.name;
-    fileMetaEl.textContent = `${formatBytes(file.size)} • ${new Date(file.lastModified).toLocaleString()}`;
+    errorEl.classList.add('hidden');
+    fileNameEl.textContent=file.name;
+    fileMetaEl.textContent=new Date(file.lastModified).toLocaleString();
     statusBox.classList.remove('hidden');
     generateBtn.disabled=false;
     generateBtn.classList.remove('cursor-not-allowed','bg-slate-200','text-slate-500');
     generateBtn.classList.add('bg-emerald-600','text-white');
-    generateBtn.onclick = async () => buildReport(file);
+    generateBtn.onclick=()=>buildReport(file);
   }
 
-  // Lectura de archivo
-  const readWorkbook = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsArrayBuffer(file); });
-  const readCSV      = (file)=> new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(file); });
-  const toAOA        = ws => XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  const readWorkbook=f=>new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsArrayBuffer(f); });
+  const readCSV=f=>new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>{ try{res(XLSX.read(e.target.result,{type:'string'}));}catch(err){rej(err);} }; r.onerror=rej; r.readAsText(f); });
+  const toAOA=ws=>XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
 
-  // Parseo de filas
   function parseRows(aoa){
-    if(!aoa || !aoa.length) return [];
-    const headers = (aoa[0]||[]).map(h=> String(h||'').trim());
-    const idx = {
-      date: headers.findIndex(h=>/^date/i.test(h)),
-      event: headers.findIndex(h=>/^event name/i.test(h)),
-      type:  headers.findIndex(h=>/^entry type/i.test(h)),
-      cat:   headers.findIndex(h=>/^category/i.test(h)),
-      amt:   headers.findIndex(h=>/^amount/i.test(h)),
-      pay:   headers.findIndex(h=>/^payment method/i.test(h)),
-      total: headers.findIndex(h=>/^total in account/i.test(h)),
-    };
+    if(!aoa?.length) return [];
+    const H=(aoa[0]||[]).map(h=>String(h||'').trim());
+    const idx={date:H.findIndex(h=>/^date/i.test(h)), event:H.findIndex(h=>/^event name/i.test(h)), type:H.findIndex(h=>/^entry type/i.test(h)), cat:H.findIndex(h=>/^category/i.test(h)), amt:H.findIndex(h=>/^amount/i.test(h)), pay:H.findIndex(h=>/^payment method/i.test(h)), total:H.findIndex(h=>/^total in account/i.test(h))};
     const rows=[];
     for(let i=1;i<aoa.length;i++){
-      const r = aoa[i]||[];
-      let amt = null;
-      const rawAmt = r[idx.amt];
-      if(typeof rawAmt==='number') amt = rawAmt;
-      else if(typeof rawAmt==='string'){ const n=parseFloat(rawAmt.replace(/[^0-9\-\.]/g,'')); amt = isNaN(n)? null : n; }
-
-      const typeStr = (r[idx.type]||'').toString().trim().toLowerCase();
-      const signedAmt = (typeStr==='expense') ? (amt!=null ? -amt : null) : amt;
-
-      const totalCell = idx.total>-1 ? r[idx.total] : null;
-      let ledgerTotal = null;
-      if (typeof totalCell==='number') ledgerTotal = totalCell;
-      else if (typeof totalCell==='string'){ const n=parseFloat(totalCell.replace(/[^0-9\-\.]/g,'')); ledgerTotal = isNaN(n)? null : n; }
-
-      rows.push({
-        date: normalizeDateCell(idx.date>-1 ? r[idx.date] : ''),
-        event: (r[idx.event]||'').toString().trim(),
-        type:  typeStr,
-        category: (r[idx.cat]||'').toString().trim(),
-        amount: signedAmt,
-        method: (r[idx.pay]||'').toString().trim(),
-        ledgerTotal: ledgerTotal
-      });
+      const r=aoa[i]||[];
+      let amt=null; const raw=r[idx.amt];
+      if(typeof raw==='number') amt=raw; else if(typeof raw==='string'){ const n=parseFloat(raw.replace(/[^0-9\-\.]/g,'')); amt=isNaN(n)?null:n; }
+      const type=(r[idx.type]||'').toString().trim().toLowerCase();
+      const signed=(type==='expense')?(amt!=null?-amt:null):amt;
+      let ledger=null; const tc=idx.total>-1?r[idx.total]:null;
+      if(typeof tc==='number') ledger=tc; else if(typeof tc==='string'){ const n=parseFloat(tc.replace(/[^0-9\-\.]/g,'')); ledger=isNaN(n)?null:n; }
+      rows.push({date:normalizeDateCell(idx.date>-1?r[idx.date]:''), event:(r[idx.event]||'').toString().trim(), type, category:(r[idx.cat]||'').toString().trim(), amount:signed, method:(r[idx.pay]||'').toString().trim(), ledgerTotal:ledger});
     }
-    return rows.filter(x=> typeof x.amount==='number' || x.category || x.event);
+    return rows.filter(x=>typeof x.amount==='number' || x.category || x.event);
   }
 
-  // Saldo inicial (Total/Banco/Efectivo)
   function findStartBreakdown(aoa){
     let total=0, bank=0, cash=0;
     outer: for(let r=0;r<Math.min(aoa.length,60);r++){
       for(let c=0;c<Math.min((aoa[r]||[]).length,60);c++){
-        const cell = (aoa[r][c]??'').toString().trim().toLowerCase();
+        const cell=(aoa[r][c]??'').toString().trim().toLowerCase();
         if(cell.includes('balance at moment of starting the report')){
-          const r2 = r+1;
+          const r2=r+1;
           for(let k=0;k<6;k++){
-            const label = (aoa[r]?.[c+k]||'').toString().trim().toLowerCase();
-            const val   = aoa[r2]?.[c+k];
-            const num = (typeof val==='number') ? val :
-                        (typeof val==='string' ? parseFloat(val.replace(/[^0-9\-\.]/g,'')) : NaN);
+            const label=(aoa[r]?.[c+k]||'').toString().trim().toLowerCase();
+            const val=aoa[r2]?.[c+k];
+            const num=(typeof val==='number')?val:(typeof val==='string'?parseFloat(val.replace(/[^0-9\-\.]/g,'')):NaN);
             if(!isNaN(num)){
-              if(label.includes('bank')) bank = num;
-              else if(label.includes('cash')) cash = num;
-              else if(label.includes('balance')) total = num;
+              if(label.includes('bank')) bank=num;
+              else if(label.includes('cash')) cash=num;
+              else if(label.includes('balance')) total=num;
             }
           }
-          if(!total && (bank||cash)) total = (bank||0)+(cash||0);
+          if(!total && (bank||cash)) total=(bank||0)+(cash||0);
           break outer;
         }
       }
@@ -223,61 +171,40 @@
     return { total: total||0, bank: bank||0, cash: cash||0 };
   }
 
-  // Agrupar por evento
   function agruparEventos(rows){
-    const map = new Map();
-    const labelMap = new Map();
-    const push = (label, amt)=>{
-      if (!map.has(label)) map.set(label,{ingresos:0, egresos:0});
-      const e = map.get(label);
-      if (amt>=0) e.ingresos += amt; else e.egresos += Math.abs(amt);
-    };
-    for (const r of rows){
-      const raw = r.event||'Sin nombre', norm = normalizeKey(raw)||'sin nombre';
-      if (!labelMap.has(norm)) labelMap.set(norm, raw);
-      const key = labelMap.get(norm);
-      if (typeof r.amount==='number') push(key, r.amount);
-    }
-    const labels = Array.from(map.keys()).sort((a,b)=> a.localeCompare(b));
-    return { labels, stats: map };
-  }
-
-  // Saldos finales por método (Banco/Efectivo)
-  function methodBalances(rows, startCash=0, startBank=0){
-    const norm = s => String(s||'').toLowerCase();
-    let cash = startCash||0, bank = startBank||0;
+    const map=new Map(), labelMap=new Map();
+    const push=(k,amt)=>{ if(!map.has(k)) map.set(k,{ingresos:0,egresos:0}); const e=map.get(k); if(amt>=0)e.ingresos+=amt; else e.egresos+=Math.abs(amt); };
     for(const r of rows){
-      const m = norm(r.method);
-      const amt = r.amount||0;
-      if (m.includes('cash')) cash += amt;
-      else bank += amt; // Banco/Zelle/desconocido → banco
+      const raw=r.event||'Sin nombre', norm=normalizeKey(raw)||'sin nombre';
+      if(!labelMap.has(norm)) labelMap.set(norm,raw);
+      const key=labelMap.get(norm);
+      if(typeof r.amount==='number') push(key,r.amount);
     }
-    return { cash, bank };
+    const labels=[...map.keys()].sort((a,b)=>a.localeCompare(b));
+    return {labels, stats:map};
   }
 
-  // Tarjetas
-  function card(titulo, valor, extra){
-    return `<div class="card rounded-xl border ${extra} p-4">
-      <div class="text-sm opacity-80">${titulo}</div>
-      <div class="text-2xl font-bold mt-1">${valor}</div>
-    </div>`;
+  function methodBalances(rows,startCash=0,startBank=0){
+    const norm=s=>String(s||'').toLowerCase();
+    let cash=startCash||0, bank=startBank||0;
+    for(const r of rows){
+      const m=norm(r.method), amt=r.amount||0;
+      if(m.includes('cash')) cash+=amt; else bank+=amt;
+    }
+    return {cash, bank};
   }
-  function tarjetasTotales(t, startTotal){
-    const totalFinal = (startTotal||0) + (t.ingresos - t.egresos);
-    return `
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-        ${card('Ingresos Totales', money(t.ingresos), 'bg-emerald-50 text-emerald-700 border-emerald-200')}
-        ${card('Gastos Totales',   money(t.egresos), 'bg-rose-50 text-rose-700 border-rose-200')}
-        ${card('Total (Final)',    money(totalFinal), totalFinal>=0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')}
-      </div>`;
+
+  const card=(t,v,extra)=>`<div class="card rounded-xl border ${extra} p-4"><div class="text-sm opacity-80">${t}</div><div class="text-2xl font-bold mt-1">${v}</div></div>`;
+  function tarjetasTotales(t,startTotal){
+    const final=(startTotal||0)+(t.ingresos-t.egresos);
+    return [
+      card('Ingresos Totales', money(t.ingresos), 'bg-emerald-50 text-emerald-700 border-emerald-200'),
+      card('Gastos Totales',   money(t.egresos),  'bg-rose-50 text-rose-700 border-rose-200'),
+      card('Total (Final)',    money(final),      final>=0?'bg-indigo-50 text-indigo-700 border-indigo-200':'bg-amber-50 text-amber-700 border-amber-200')
+    ].join('');
   }
-  function tarjetasFinales(mb){
-    return `
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        ${card('Banco Final (incl. Zelle)', money(mb.bank), 'bg-blue-50 text-blue-700 border-blue-200')}
-        ${card('Efectivo Final',             money(mb.cash), 'bg-yellow-50 text-yellow-700 border-yellow-200')}
-      </div>`;
-  }
+  const tarjetaBancoFinal = mb => card('Banco Final (incl. Zelle)', money(mb.bank), 'bg-blue-50 text-blue-700 border-blue-200');
+  const tarjetaEfectivoFinal = mb => card('Efectivo Final', money(mb.cash), 'bg-yellow-50 text-yellow-700 border-yellow-200');
   function tarjetasIniciales(s){
     return `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
@@ -287,86 +214,10 @@
       </div>`;
   }
 
-  async function buildReport(file){
-    try{
-      const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const aoa = toAOA(ws);
-      const rows = parseRows(aoa);
-      const start = findStartBreakdown(aoa);
-
-      // Totales
-      const tot = {
-        ingresos: sum(rows, r=> r.amount>0 ? r.amount : 0),
-        egresos:  sum(rows, r=> r.amount<0 ? -r.amount : 0)
-      };
-
-      // Rango de meses (por inputs o por datos)
-      const fechas = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
-      let y1, m1, y2, m2;
-      if (mesInicial.value) { const [yy,mm] = mesInicial.value.split('-').map(Number); y1=yy; m1=mm; }
-      if (mesFinal.value)   { const [yy,mm] = mesFinal.value.split('-').map(Number); y2=yy; m2=mm; }
-      if (!y1 || !m1 || !y2 || !m2) {
-        // Derivar de datos si no llenaron los inputs
-        if (fechas.length){
-          const a = new Date(fechas[0]);  y1 = a.getUTCFullYear(); m1 = a.getUTCMonth()+1;
-          const b = new Date(fechas[fechas.length-1]); y2 = b.getUTCFullYear(); m2 = b.getUTCMonth()+1;
-        } else {
-          const now = new Date(); y1=y2=now.getUTCFullYear(); m1=m2=now.getUTCMonth()+1;
-        }
-        mesInicial.value = `${y1}-${String(m1).padStart(2,'0')}`;
-        mesFinal.value   = `${y2}-${String(m2).padStart(2,'0')}`;
-      }
-      const tituloPeriodo = rangoMesesTexto(y1,m1,y2,m2);
-
-      // Final por método
-      const mb = methodBalances(rows, start.cash, start.bank);
-
-      // Eventos agrupados
-      const ev = agruparEventos(rows);
-
-      // Construir HTML (1 sola hoja)
-      reporte.innerHTML = `
-        <div class="sheet bg-white rounded-2xl shadow-sm p-6">
-          <!-- Encabezado de impresión -->
-          <div class="print-only mb-2 text-center">
-            <h1 class="text-3xl font-extrabold">Reporte Financiero Matachinas ${esc(tituloPeriodo)}</h1>
-            <p class="text-slate-600">${esc(file.name)}</p>
-          </div>
-
-          <div class="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 class="text-2xl font-extrabold text-slate-800">Resumen Financiero</h2>
-              <p class="text-slate-600">Archivo: ${esc(file.name)}</p>
-              <p class="text-slate-500 text-sm">Periodo: ${esc(tituloPeriodo)}</p>
-            </div>
-            <div class="text-right text-sm text-slate-500">Montos en USD</div>
-          </div>
-
-          ${tarjetasTotales(tot, start.total)}
-          ${tarjetasFinales(mb)}
-          ${tarjetasIniciales(start)}
-
-          <div class="mt-6">
-            <h3 class="text-xl font-bold text-slate-800">Resumen por Evento (Agrupado)</h3>
-            <div class="mt-2">${tablaEventos(ev)}</div>
-          </div>
-        </div>
-      `;
-
-      printBtn.disabled = false;
-      reporte.classList.remove('hidden');
-    } catch(err){
-      errorEl.textContent = 'No se pudo leer el archivo. Asegúrate de usar los encabezados correctos en una sola hoja.';
-      errorEl.classList.remove('hidden');
-      console.error(err);
-    }
-  }
-
-  function tablaEventos(grouped){
-    if (!grouped.labels.length) return `<p class="text-slate-600 mt-2">Sin eventos.</p>`;
-    const filas = grouped.labels.map(k=>{
-      const s = grouped.stats.get(k);
+  function tablaEventos(g){
+    if(!g.labels.length) return `<p class="text-slate-600 mt-2">Sin eventos.</p>`;
+    const filas=g.labels.map(k=>{
+      const s=g.stats.get(k);
       return `<tr class="hover:bg-slate-50">
         <td class="py-2 pr-3">${esc(k)}</td>
         <td class="py-2 pr-3 text-right font-semibold" style="color:${BLUE}">${money(s.ingresos)}</td>
@@ -385,8 +236,82 @@
     </table>`;
   }
 
-  // Estado inicial
-  (function init(){ generateBtn.disabled = true; printBtn.disabled = true; })();
+  async function buildReport(file){
+    try{
+      const wb = isCSV(file) ? await readCSV(file) : await readWorkbook(file);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa= XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+      const rows=parseRows(aoa);
+      const start=findStartBreakdown(aoa);
+
+      const tot={ ingresos: sum(rows,r=> r.amount>0 ? r.amount : 0),
+                  egresos:  sum(rows,r=> r.amount<0 ? -r.amount : 0) };
+
+      // Mes título = MES INICIAL
+      const fechas = rows.map(r=>r.date).filter(Boolean).sort((a,b)=> new Date(a)-new Date(b));
+      let y1,m1,y2,m2;
+      if(mesInicial.value){ [y1,m1]=mesInicial.value.split('-').map(Number); }
+      if(mesFinal.value){   [y2,m2]=mesFinal.value.split('-').map(Number); }
+      if(!y1||!m1){ // derivar
+        if(fechas.length){ const a=new Date(fechas[0]); y1=a.getUTCFullYear(); m1=a.getUTCMonth()+1; }
+        else { const n=new Date(); y1=n.getUTCFullYear(); m1=n.getUTCMonth()+1; }
+        mesInicial.value=`${y1}-${String(m1).padStart(2,'0')}`;
+      }
+      if(!y2||!m2){
+        if(fechas.length){ const b=new Date(fechas[fechas.length-1]); y2=b.getUTCFullYear(); m2=b.getUTCMonth()+1; }
+        else { y2=y1; m2=m1; }
+        mesFinal.value=`${y2}-${String(m2).padStart(2,'0')}`;
+      }
+      const tituloMes = mesNombre(y1,m1); // <-- SOLO mes inicial
+
+      const mb=methodBalances(rows,start.cash,start.bank);
+      const ev=agruparEventos(rows);
+
+      // Tarjetas: 5 en una fila
+      const tarjetasFila = `
+        <div class="cards-5 grid grid-cols-1 md:grid-cols-5 gap-4 mt-6">
+          ${tarjetasTotales(tot, start.total)}
+          ${tarjetaBancoFinal(mb)}
+          ${tarjetaEfectivoFinal(mb)}
+        </div>`;
+
+      reporte.innerHTML=`
+        <div class="bg-white rounded-2xl shadow-sm p-6">
+          <div class="print-only text-center mb-1">
+            <h1 class="text-3xl font-extrabold">Resumen Financiero ${esc(tituloMes)}</h1>
+            <p class="text-slate-600">${esc(file.name)}</p>
+          </div>
+
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-extrabold text-slate-800">Resumen Financiero ${esc(tituloMes)}</h2>
+              <p class="text-slate-600">Archivo: ${esc(file.name)}</p>
+              <p class="text-slate-500 text-sm">Periodo: ${mesNombre(y1,m1)} – ${mesNombre(y2,m2)}</p>
+            </div>
+            <div class="text-right text-sm text-slate-500">Montos en USD</div>
+          </div>
+
+          ${tarjetasFila}
+          ${tarjetasIniciales(start)}
+
+          <div class="mt-6">
+            <h3 class="text-xl font-bold text-slate-800">Resumen por Evento (Agrupado)</h3>
+            ${tablaEventos(ev)}
+          </div>
+        </div>
+      `;
+
+      printBtn.disabled=false;
+      reporte.classList.remove('hidden');
+    }catch(err){
+      errorEl.textContent='No se pudo leer el archivo. Verifica que tenga los encabezados correctos.';
+      errorEl.classList.remove('hidden');
+      console.error(err);
+    }
+  }
+
+  // init
+  (function(){ generateBtn.disabled=true; printBtn.disabled=true; })();
 </script>
 </body>
 </html>
